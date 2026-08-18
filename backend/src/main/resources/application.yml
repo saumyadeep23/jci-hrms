@@ -1,0 +1,23 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: jci-hrms-backend
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/jcihrms}
+    username: ${SPRING_DATASOURCE_USERNAME:jcihrms_admin}
+    password: ${SPRING_DATASOURCE_PASSWORD:changeme}
+  jpa:
+    hibernate:
+      ddl-auto: validate # use Flyway/Liquibase migrations, not auto-DDL, once schema stabilizes
+    show-sql: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when-authorized
