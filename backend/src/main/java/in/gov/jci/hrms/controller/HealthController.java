@@ -9,6 +9,8 @@ import java.util.Map;
 /**
  * Simple ping endpoint separate from Actuator's /actuator/health,
  * useful for a quick manual sanity check after a deploy.
+ *
+ * (No-op change to verify the CI/CD pipeline's PR build-and-test job.)
  */
 @RestController
 public class HealthController {
