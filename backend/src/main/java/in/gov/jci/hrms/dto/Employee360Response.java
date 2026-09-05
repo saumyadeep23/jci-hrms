@@ -1,0 +1,66 @@
+package in.gov.jci.hrms.dto;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+
+/** GET /api/employees/:id/360 - one unified read model, sourced entirely from vw_jci_employee_master_360 (V32 migration). */
+public record Employee360Response(
+        Long employeeId,
+        String cpfAcNo,
+        String employeeCode,
+        String fullName,
+        String salutation,
+        LocalDate dateOfBirth,
+        Integer age,
+        String gender,
+        String maritalStatus,
+        String bloodGroup,
+        String panNumber,
+        String aadhaarRefNumber,
+        String personalEmail,
+        String officialEmail,
+        String personalMobile,
+        String officialMobile,
+        String employmentStatus,
+        LocalDate dateOfJoining,
+        String employmentCategory,
+        String compensationTierSummary,
+        /** Live monthly basic - COALESCE(rpf.basic_pay, cat.regular_basic_pay), see V57 migration. */
+        BigDecimal currentBasicPay,
+        /** Historical entry/appointment basic pay only - never updated by increments/promotions. */
+        BigDecimal entryBasicPay,
+        String currentScaleCode,
+        String incrementCycle,
+        LocalDate currentPayEffectiveDate,
+        BigDecimal dailyWageRate,
+        BigDecimal fixedLumpSumMonthly,
+        BigDecimal monthlyCtc,
+        String outsourcedVendorName,
+        Long currentPostId,
+        String currentPostCode,
+        String currentPostTitle,
+        String currentAssignmentType,
+        LocalDate postAssignmentStartDate,
+        String departmentCode,
+        String departmentName,
+        String designationCode,
+        String designationTitle,
+        String scaleGrade,
+        String roCode,
+        String roName,
+        String dpcCode,
+        String dpcName,
+        String activeBankName,
+        String activeBankBranch,
+        String activeBankAccountNo,
+        String activeBankIfsc,
+        String bankVerificationStatus,
+        String socialCategory,
+        Boolean isPwbd,
+        String disabilityType,
+        LocalDate superannuationDate,
+        Boolean isBoardDirector,
+        String superannuationCalculationBasis,
+        String pensionSettlementStatus
+) {
+}

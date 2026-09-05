@@ -1,0 +1,153 @@
+package in.gov.jci.hrms.service;
+
+import in.gov.jci.hrms.dto.AttendanceRegularizationRequest;
+import in.gov.jci.hrms.dto.AttendanceRegularizationResponse;
+import in.gov.jci.hrms.dto.RegularizationDecisionRequest;
+import in.gov.jci.hrms.entity.ApprovalStatus;
+import in.gov.jci.hrms.entity.AttendanceDetailStatus;
+import in.gov.jci.hrms.entity.AttendanceRegularizationApplication;
+import in.gov.jci.hrms.entity.AttendanceStatus;
+import in.gov.jci.hrms.entity.DailyAttendance;
+import in.gov.jci.hrms.entity.Department;
+import in.gov.jci.hrms.entity.Designation;
+import in.gov.jci.hrms.entity.Employee;
+import in.gov.jci.hrms.entity.LeaveBalance;
+import in.gov.jci.hrms.entity.LeaveLedgerEntry;
+import in.gov.jci.hrms.entity.LeaveLedgerSource;
+import in.gov.jci.hrms.entity.LeaveType;
+import in.gov.jci.hrms.entity.RegularizationReasonCode;
+import in.gov.jci.hrms.exception.BusinessRuleViolationException;
+import in.gov.jci.hrms.repository.AttendanceRegularizationApplicationRepository;
+import in.gov.jci.hrms.repository.DailyAttendanceRepository;
+import in.gov.jci.hrms.repository.EmployeeRepository;
+import in.gov.jci.hrms.repository.LeaveBalanceRepository;
+import in.gov.jci.hrms.repository.LeaveLedgerEntryRepository;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
+
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.util.Optional;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.when;
+
+@ExtendWith(MockitoExtension.class)
+class AttendanceRegularizationServiceTest {
+
+    @Mock
+    private AttendanceRegularizationApplicationRepository regularizationRepository;
+    @Mock
+    private DailyAttendanceRepository dailyAttendanceRepository;
+    @Mock
+    private LeaveBalanceRepository leaveBalanceRepository;
+    @Mock
+    private LeaveLedgerEntryRepository leaveLedgerEntryRepository;
+    @Mock
+    private EmployeeRepository employeeRepository;
+    @Mock
+    private SupervisorResolutionService supervisorResolutionService;
+
+    private AttendanceRegularizationService service;
+    private Employee employee;
+    private DailyAttendance dailyAttendance;
+
+    @BeforeEach
+    void setUp() {
+        service = new AttendanceRegularizationService(regularizationRepository, dailyAttendanceRepository,
+                leaveBalanceRepository, leaveLedgerEntryRepository, employeeRepository, supervisorResolutionService);
+
+        Department department = new Department("ENG", "Engineering");
+        ReflectionTestUtils.setField(department, "id", 10L);
+        Designation designation = new Designation("Manager");
+        ReflectionTestUtils.setField(designation, "id", 20L);
+        employee = new Employee("EMP-001", "Asha", "Rao", "asha.rao@example.com",
+                LocalDate.of(2020, 1, 1), department, designation);
+        ReflectionTestUtils.setField(employee, "id", 1L);
+
+        dailyAttendance = new DailyAttendance(employee, LocalDate.of(2026, 3, 10), AttendanceStatus.PRESENT);
+        ReflectionTestUtils.setField(dailyAttendance, "id", 7L);
+        dailyAttendance.applyDetail(AttendanceDetailStatus.UNAUTHORIZED_LATE, "Exceeded concessions", null, null);
+
+        lenient().when(employeeRepository.findById(1L)).thenReturn(Optional.of(employee));
+        lenient().when(dailyAttendanceRepository.findByEmployeeIdAndAttendanceDate(1L, LocalDate.of(2026, 3, 10)))
+                .thenReturn(Optional.of(dailyAttendance));
+        lenient().when(supervisorResolutionService.resolveSupervisor(1L)).thenReturn(Optional.empty());
+        lenient().when(regularizationRepository.saveAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(dailyAttendanceRepository.saveAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(leaveLedgerEntryRepository.saveAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(leaveBalanceRepository.saveAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
+    }
+
+    @Test
+    void submit_forIneligibleDay_throws() {
+        dailyAttendance.applyDetail(AttendanceDetailStatus.PRESENT, null, null, null);
+        AttendanceRegularizationRequest request = new AttendanceRegularizationRequest(1L, LocalDate.of(2026, 3, 10),
+                RegularizationReasonCode.FORGOT_PUNCH, "Forgot to punch", Instant.now(), Instant.now());
+
+        assertThatThrownBy(() -> service.submit(request)).isInstanceOf(BusinessRuleViolationException.class);
+    }
+
+    @Test
+    void approve_withAutoPenaltyDebited_resetsToPresentAndRefundsPenalty() {
+        dailyAttendance.setAutoPenaltyDebited(true);
+        AttendanceRegularizationApplication application = new AttendanceRegularizationApplication(employee,
+                LocalDate.of(2026, 3, 10), dailyAttendance, RegularizationReasonCode.FORGOT_PUNCH, "Forgot to punch",
+                Instant.parse("2026-03-10T04:15:00Z"), Instant.parse("2026-03-10T12:45:00Z"));
+        ReflectionTestUtils.setField(application, "id", 3L);
+        when(regularizationRepository.findById(3L)).thenReturn(Optional.of(application));
+
+        LeaveType cl = new LeaveType("CL", "Casual Leave", new BigDecimal("8.0"), false, true);
+        ReflectionTestUtils.setField(cl, "id", 50L);
+        LeaveBalance clBalance = new LeaveBalance(employee, cl, 2026, new BigDecimal("8.0"));
+        clBalance.setUsedDays(new BigDecimal("0.5"));
+        LeaveLedgerEntry originalDebit = new LeaveLedgerEntry(employee, cl, LocalDate.of(2026, 3, 10),
+                new BigDecimal("-0.5"), "Auto-debited", LeaveLedgerSource.AUTO_LATE_DEDUCTION);
+
+        when(leaveLedgerEntryRepository.findByRelatedDailyAttendanceId(7L)).thenReturn(Optional.of(originalDebit));
+        when(leaveBalanceRepository.findByEmployeeIdAndLeaveTypeIdAndYear(1L, 50L, 2026)).thenReturn(Optional.of(clBalance));
+
+        AttendanceRegularizationResponse response = service.approve(3L, new RegularizationDecisionRequest(true, "Approved by HoD"));
+
+        assertThat(response.approvalStatus()).isEqualTo(ApprovalStatus.APPROVED);
+        assertThat(dailyAttendance.getDetailStatus()).isEqualTo(AttendanceDetailStatus.PRESENT);
+        assertThat(dailyAttendance.isRegularized()).isTrue();
+        assertThat(dailyAttendance.isAutoPenaltyDebited()).isFalse();
+        assertThat(clBalance.getUsedDays()).isEqualByComparingTo("0.0");
+    }
+
+    @Test
+    void approve_withoutAutoPenaltyDebited_doesNotTouchLedger() {
+        AttendanceRegularizationApplication application = new AttendanceRegularizationApplication(employee,
+                LocalDate.of(2026, 3, 10), dailyAttendance, RegularizationReasonCode.FORGOT_PUNCH, "Forgot to punch",
+                Instant.parse("2026-03-10T04:15:00Z"), Instant.parse("2026-03-10T12:45:00Z"));
+        ReflectionTestUtils.setField(application, "id", 4L);
+        when(regularizationRepository.findById(4L)).thenReturn(Optional.of(application));
+
+        service.approve(4L, new RegularizationDecisionRequest(true, "Approved"));
+
+        org.mockito.Mockito.verifyNoInteractions(leaveLedgerEntryRepository);
+    }
+
+    @Test
+    void approve_rejected_leavesDailyAttendanceUnchanged() {
+        AttendanceRegularizationApplication application = new AttendanceRegularizationApplication(employee,
+                LocalDate.of(2026, 3, 10), dailyAttendance, RegularizationReasonCode.FORGOT_PUNCH, "Forgot to punch",
+                Instant.now(), Instant.now());
+        ReflectionTestUtils.setField(application, "id", 6L);
+        when(regularizationRepository.findById(6L)).thenReturn(Optional.of(application));
+
+        service.approve(6L, new RegularizationDecisionRequest(false, "Insufficient justification"));
+
+        assertThat(dailyAttendance.getDetailStatus()).isEqualTo(AttendanceDetailStatus.UNAUTHORIZED_LATE);
+        assertThat(dailyAttendance.isRegularized()).isFalse();
+    }
+}

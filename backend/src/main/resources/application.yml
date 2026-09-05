@@ -5,13 +5,45 @@ spring:
   application:
     name: jci-hrms-backend
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/jcihrms}
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/jcihrms?serverTimezone=UTC}
     username: ${SPRING_DATASOURCE_USERNAME:jcihrms_admin}
     password: ${SPRING_DATASOURCE_PASSWORD:changeme}
   jpa:
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
     hibernate:
-      ddl-auto: validate # use Flyway/Liquibase migrations, not auto-DDL, once schema stabilizes
-    show-sql: false
+      ddl-auto: validate
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # Real IdP (Keycloak/Auth0/etc.) not yet provisioned for any environment.
+          # Blank here means SecurityConfig.jwtDecoder() falls back to a local HS256
+          # decoder (security.jwt.local-dev-secret below) instead of OIDC discovery -
+          # see its javadoc. Set this once a real issuer exists.
+          issuer-uri: ${JWT_ISSUER_URI:}
+  cache:
+    cache-names: pincodeCache,ifscCache
+    caffeine:
+      # FR-EMP.14: India Post pincode->district/state and bank IFSC->branch both
+      # rarely change, so a long TTL is safe and meaningfully cuts outbound
+      # calls/latency to the lookup proxies.
+      spec: expireAfterWrite=24h,maximumSize=5000
+  servlet:
+    multipart:
+      # PIMS_SPEC.md Step 8 (Document Verification & Final Review) uploads -
+      # per-file and per-request caps; MIME/extension whitelisting is
+      # enforced in the upload service itself, not here.
+      enabled: true
+      max-file-size: 10MB
+      max-request-size: 15MB
+
+# Local/test-only JWT signing secret for the SecurityConfig.jwtDecoder() fallback used
+# when issuer-uri above is blank - NEVER reuse this default outside local dev/CI.
+security:
+  jwt:
+    local-dev-secret: ${JWT_LOCAL_DEV_SECRET:local-dev-only-secret-key-never-use-in-production-32bytes}
 
 management:
   endpoints:
@@ -21,3 +53,19 @@ management:
   endpoint:
     health:
       show-details: when-authorized
+
+# PIMS_SPEC.md Section 3.C - LocalStorageServiceImpl's storage root.
+# A local-disk stand-in for the eventual S3 bucket; swap the
+# DocumentStorageService bean for an S3-backed one when that's provisioned.
+hrms:
+  storage:
+    local-dir: ${HRMS_STORAGE_LOCAL_DIR:./uploads}
+
+# PLACEHOLDER figures, not confirmed JCI wage-settlement policy - see
+# PayrollRateProperties javadoc. Override once the real numbers are known.
+payroll:
+  rates:
+    hra-percent-x: 24.00
+    hra-percent-y: 16.00
+    hra-percent-z: 8.00
+    transport-allowance-base: 1600.00

@@ -21,6 +21,10 @@ env:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    env:
+      # Belt-and-suspenders alongside the surefire <argLine> in pom.xml: keeps
+      # test runs UTC-stable even if a runner's default TZ isn't UTC.
+      TZ: UTC
     steps:
       - uses: actions/checkout@v4
 

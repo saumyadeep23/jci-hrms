@@ -1,0 +1,14 @@
+-- DeviceType (Java enum) was split - MOBILE -> ANDROID_MOBILE / IOS_MOBILE,
+-- plus two new desktop/web variants added - without a data migration for
+-- rows already registered under the old value. Any registered_devices row
+-- still holding device_type = 'MOBILE' is unreadable by
+-- @Enumerated(EnumType.STRING): Hibernate throws IllegalArgumentException
+-- ("No enum constant ...DeviceType.MOBILE") the moment that row is loaded,
+-- surfacing as a 500 on GET /api/v1/attendance/devices (admin list-all) and
+-- any other query that touches it.
+--
+-- Backfilled to ANDROID_MOBILE - the closest and most common equivalent.
+-- There's no way to recover which OS a pre-split registration actually used
+-- from the stored data alone; an admin/employee can re-register with the
+-- correct type if this guess is wrong, same as any other device edit today.
+UPDATE registered_devices SET device_type = 'ANDROID_MOBILE' WHERE device_type = 'MOBILE';

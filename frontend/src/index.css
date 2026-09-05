@@ -1,0 +1,48 @@
+@import "tailwindcss";
+
+/*
+ * JCI corporate palette (Phase 12 spec):
+ *   Primary   - Deep Forest Green #0b4d2c
+ *   Accent    - Golden Jute #d4a373 / Amber #d97706
+ *   Background- Slate #f8fafc
+ * Exposed as Tailwind utilities: bg-brand-forest, text-brand-jute, etc.
+ */
+@theme {
+  --color-brand-forest: #0b4d2c;
+  --color-brand-forest-dark: #073821;
+  --color-brand-forest-light: #146b3e;
+  --color-brand-jute: #d4a373;
+  --color-brand-amber: #d97706;
+  --color-brand-slate: #f8fafc;
+
+  --font-sans: "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+
+@layer base {
+  html, body, #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-brand-slate text-slate-800 antialiased;
+  }
+}
+
+@layer utilities {
+  /* Print stylesheet used by every printable document template (payslip,
+     PF statement, Form-16, service book) - hides the app chrome and
+     expands the document to fill the printable page. */
+  @media print {
+    .no-print {
+      display: none !important;
+    }
+
+    .print-sheet {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      box-shadow: none !important;
+      border: none !important;
+    }
+  }
+}
