@@ -4,7 +4,9 @@ import in.gov.jci.hrms.dto.EmployeeMovementRecordResponse;
 import in.gov.jci.hrms.dto.JoiningDecisionRequest;
 import in.gov.jci.hrms.dto.JoiningReportRequest;
 import in.gov.jci.hrms.dto.MovementReleaseRequest;
+import in.gov.jci.hrms.dto.PostIncumbencyRequest;
 import in.gov.jci.hrms.dto.ServiceBookEventRequest;
+import in.gov.jci.hrms.entity.AssignmentType;
 import in.gov.jci.hrms.entity.CareerEventType;
 import in.gov.jci.hrms.entity.Employee;
 import in.gov.jci.hrms.entity.EmployeeMovementRecord;
@@ -16,10 +18,12 @@ import in.gov.jci.hrms.entity.LeaveType;
 import in.gov.jci.hrms.entity.MovementOrderType;
 import in.gov.jci.hrms.entity.MovementStatus;
 import in.gov.jci.hrms.entity.PayrollSyncStatus;
+import in.gov.jci.hrms.entity.PostMaster;
 import in.gov.jci.hrms.entity.RegionalOffice;
 import in.gov.jci.hrms.entity.SessionType;
 import in.gov.jci.hrms.entity.TransferNature;
 import in.gov.jci.hrms.exception.BusinessRuleViolationException;
+import in.gov.jci.hrms.exception.EmployeeNotFoundException;
 import in.gov.jci.hrms.exception.MasterDataConflictException;
 import in.gov.jci.hrms.exception.MasterDataNotFoundException;
 import in.gov.jci.hrms.repository.EmployeeMovementRecordRepository;
@@ -27,11 +31,16 @@ import in.gov.jci.hrms.repository.EmployeeRepository;
 import in.gov.jci.hrms.repository.LeaveEntitlementBalanceRepository;
 import in.gov.jci.hrms.repository.LeaveLedgerEntryRepository;
 import in.gov.jci.hrms.repository.LeaveTypeRepository;
+import in.gov.jci.hrms.repository.PostIncumbencyRepository;
+import in.gov.jci.hrms.repository.PostMasterRepository;
 import in.gov.jci.hrms.service.pdf.ReleaseOrderPdfGenerator;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -50,11 +59,15 @@ import java.util.List;
 @Transactional(readOnly = true)
 public class JoiningReportService {
 
+    private static final Logger log = LoggerFactory.getLogger(JoiningReportService.class);
+
     /** All employees are physically in India - the DB-clock session cutoff is evaluated in IST regardless of the submitting device/app-server's own timezone. */
     private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
     private static final LocalTime SESSION_CUTOFF = LocalTime.of(13, 0);
     private static final String EL_CODE = "EL";
     private static final BigDecimal EL_CEILING = BigDecimal.valueOf(300);
+    /** Same 50:50 encashable/enjoyable credit split ElAccrualService uses for the semi-annual accrual - kept consistent so currentBalance/availableBalance never runs ahead of encashableCurrent+enjoyableCurrent. */
+    private static final BigDecimal HALF_SPLIT = new BigDecimal("0.50");
 
     private final EmployeeMovementRecordRepository movementRecordRepository;
     private final EmployeeRepository employeeRepository;
@@ -67,13 +80,18 @@ public class JoiningReportService {
     private final LeaveEntitlementBalanceRepository entitlementBalanceRepository;
     private final LeaveLedgerEntryRepository leaveLedgerEntryRepository;
     private final ReleaseOrderPdfGenerator releaseOrderPdfGenerator;
+    private final PostIncumbencyRepository postIncumbencyRepository;
+    private final PostMasterRepository postMasterRepository;
+    private final PostIncumbencyService postIncumbencyService;
 
     public JoiningReportService(EmployeeMovementRecordRepository movementRecordRepository, EmployeeRepository employeeRepository,
                                  DbClockService dbClockService, JoiningTimeCalculatorService joiningTimeCalculatorService,
                                  GeofenceService geofenceService, EmployeeServiceBookService employeeServiceBookService,
                                  PayrollMovementIntegrationService payrollMovementIntegrationService,
                                  LeaveTypeRepository leaveTypeRepository, LeaveEntitlementBalanceRepository entitlementBalanceRepository,
-                                 LeaveLedgerEntryRepository leaveLedgerEntryRepository, ReleaseOrderPdfGenerator releaseOrderPdfGenerator) {
+                                 LeaveLedgerEntryRepository leaveLedgerEntryRepository, ReleaseOrderPdfGenerator releaseOrderPdfGenerator,
+                                 PostIncumbencyRepository postIncumbencyRepository, PostMasterRepository postMasterRepository,
+                                 PostIncumbencyService postIncumbencyService) {
         this.movementRecordRepository = movementRecordRepository;
         this.employeeRepository = employeeRepository;
         this.dbClockService = dbClockService;
@@ -85,6 +103,9 @@ public class JoiningReportService {
         this.leaveTypeRepository = leaveTypeRepository;
         this.entitlementBalanceRepository = entitlementBalanceRepository;
         this.leaveLedgerEntryRepository = leaveLedgerEntryRepository;
+        this.postIncumbencyRepository = postIncumbencyRepository;
+        this.postMasterRepository = postMasterRepository;
+        this.postIncumbencyService = postIncumbencyService;
     }
 
     public List<EmployeeMovementRecordResponse> pendingReleases() {
@@ -116,8 +137,20 @@ public class JoiningReportService {
         record.setReleasedAtDbTimestamp(dbClockService.now());
         record.setMovementStatus(MovementStatus.RELIEVED);
 
-        employeeServiceBookService.recordEvent(record.getEmployee().getId(), releaseServiceBookEvent(record));
-        return EmployeeMovementRecordResponse.from(record);
+        Long employeeId = record.getEmployee().getId();
+        employeeServiceBookService.recordEvent(employeeId, releaseServiceBookEvent(record));
+        // Built before the bulk-update call below: closeActiveIncumbency's clearAutomatically detaches
+        // record from the persistence context, and any of its not-yet-touched lazy associations
+        // (toOffice/toDesignation/order/...) would throw LazyInitializationException read afterward.
+        EmployeeMovementRecordResponse response = EmployeeMovementRecordResponse.from(record);
+
+        // Closes out the outgoing post's incumbency record only - CRITICAL INVARIANT: nothing here
+        // touches the employees table itself. The employee is in transit (Joining Time) between the old
+        // and new posts and does not yet hold the new one; employee.designation/department/regionalOffice
+        // only get synced once joining is actually approved - see syncPostIncumbencyAndMasterData().
+        postIncumbencyRepository.closeActiveIncumbency(employeeId, request.releaseDate());
+
+        return response;
     }
 
     /**
@@ -269,7 +302,15 @@ public class JoiningReportService {
         } else {
             record.setJoiningStatus(JoiningStatus.REJECTED);
         }
-        return EmployeeMovementRecordResponse.from(record);
+
+        // Built before syncPostIncumbencyAndMasterData() below - its bulk-update closeActiveIncumbency
+        // call (clearAutomatically=true) detaches record from the persistence context, and any of its
+        // not-yet-touched lazy associations would throw LazyInitializationException read afterward.
+        EmployeeMovementRecordResponse response = EmployeeMovementRecordResponse.from(record);
+        if (Boolean.TRUE.equals(decision.approve())) {
+            syncPostIncumbencyAndMasterData(record);
+        }
+        return response;
     }
 
     @Transactional
@@ -294,6 +335,62 @@ public class JoiningReportService {
         record.setLpcNumber("LPC/" + record.getId() + "/" + record.getJoiningDate().getYear());
         record.setPayrollSyncStatus(PayrollSyncStatus.LPC_ISSUED);
         record.setEffectivePayFixationDate(record.getJoiningDate());
+    }
+
+    /**
+     * Resolves the sanctioned PostMaster seat matching the movement's destination (department/
+     * designation/regionalOffice) and, only when exactly one such post exists, closes any lingering
+     * active incumbency for the employee (defensive - release() already closes the outgoing one; this
+     * covers a movement whose release step was skipped, or any other incumbency the employee still
+     * holds), opens a new SUBSTANTIVE incumbency at the destination via PostIncumbencyService.create()
+     * (which itself closes out whoever else currently holds THAT post), and syncs the employee's own
+     * department/designation/regionalOffice/departmentalPurchaseCentre master fields to match - this is
+     * what finally closes the "employee.getRegionalOffice() is never updated by the movement lifecycle"
+     * gap PayrollBatchComputationService's own javadoc has to document as a workaround for.
+     *
+     * <p>Movement Orders and the Post Incumbency ledger are otherwise two independent subsystems -
+     * EmployeeMovementRecord carries no postId, only office/department/designation - so a destination
+     * matching zero or more than one PostMaster is left alone here: there is nothing unambiguous to
+     * link/sync against, and this must never block the otherwise-complete joining approval (service
+     * book, EL credit, payroll movement inputs) that already ran in approveJoiningReport(). Called only
+     * after the caller (decide()) has already built its own response DTO from record - see its own
+     * comment for why: closeActiveIncumbency's clearAutomatically detaches record from the persistence
+     * context, and any of its not-yet-touched lazy associations would throw LazyInitializationException
+     * read afterward.
+     */
+    private void syncPostIncumbencyAndMasterData(EmployeeMovementRecord record) {
+        if (record.getToDepartment() == null) {
+            log.info("Movement {} has no destination department - skipping post-incumbency sync", record.getId());
+            return;
+        }
+        List<PostMaster> candidates = postMasterRepository.findByDepartment_IdAndDesignation_IdAndRegionalOffice_Id(
+                record.getToDepartment().getId(), record.getToDesignation().getId(), record.getToOffice().getId());
+        if (candidates.size() != 1) {
+            log.info("Movement {} destination matches {} sanctioned posts - skipping post-incumbency sync",
+                    record.getId(), candidates.size());
+            return;
+        }
+        PostMaster post = candidates.get(0);
+        Long employeeId = record.getEmployee().getId();
+        LocalDate joiningDate = record.getJoiningDate();
+        String joiningReportNo = record.getJoiningReportNo();
+
+        postIncumbencyRepository.closeActiveIncumbency(employeeId, joiningDate);
+
+        postIncumbencyService.create(new PostIncumbencyRequest(post.getId(), employeeId, AssignmentType.SUBSTANTIVE,
+                joiningDate, null, joiningReportNo));
+
+        Employee employee = employeeRepository.findById(employeeId)
+                .orElseThrow(() -> new EmployeeNotFoundException(employeeId));
+        employee.setDesignation(post.getDesignation());
+        employee.setDepartment(post.getDepartment());
+        if (post.getRegionalOffice() != null) {
+            employee.setRegionalOffice(post.getRegionalOffice());
+        }
+        if (post.getDepartmentalPurchaseCentre() != null) {
+            employee.setDepartmentalPurchaseCentre(post.getDepartmentalPurchaseCentre());
+        }
+        employeeRepository.save(employee);
     }
 
     private void recordJoiningServiceBookEvent(EmployeeMovementRecord record) {
@@ -354,9 +451,18 @@ public class JoiningReportService {
             return;
         }
 
+        BigDecimal encashableCredit = creditAllowed.multiply(HALF_SPLIT).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal enjoyableCredit = creditAllowed.subtract(encashableCredit);
+
         balance.setCreditedDays(balance.getCreditedDays().add(creditAllowed));
         balance.setCurrentBalance(balance.getCurrentBalance().add(creditAllowed));
         balance.setAvailableBalance(balance.getAvailableBalance().add(creditAllowed));
+        balance.setEncashableCredited(balance.getEncashableCredited().add(encashableCredit));
+        balance.setEncashableCurrent(balance.getEncashableCurrent().add(encashableCredit));
+        balance.setEncashableAvailable(balance.getEncashableAvailable().add(encashableCredit));
+        balance.setEnjoyableCredited(balance.getEnjoyableCredited().add(enjoyableCredit));
+        balance.setEnjoyableCurrent(balance.getEnjoyableCurrent().add(enjoyableCredit));
+        balance.setEnjoyableAvailable(balance.getEnjoyableAvailable().add(enjoyableCredit));
         entitlementBalanceRepository.saveAndFlush(balance);
 
         LeaveLedgerEntry entry = new LeaveLedgerEntry(record.getEmployee(), el, record.getJoiningDate(), creditAllowed,

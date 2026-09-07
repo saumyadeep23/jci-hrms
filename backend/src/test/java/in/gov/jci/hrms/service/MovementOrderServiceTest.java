@@ -124,8 +124,11 @@ class MovementOrderServiceTest {
 
         service.create(promotionRequest("E1", LocalDate.of(2026, 3, 1)));
 
-        assertThat(previous.isCurrent()).isFalse();
-        assertThat(previous.getEffectiveTo()).isEqualTo(LocalDate.of(2026, 2, 28));
+        // Closed via a bulk UPDATE now, not by mutating and re-saving the loaded entity - see
+        // RegularPayFixationRepository.closeCurrentFixation()'s own javadoc for why (avoids the real
+        // Hibernate flush-ordering and lazy-association bugs that entity mutation hit here). previous
+        // itself is therefore never mutated by create() - only read from, for currentBasic/incrementCycle.
+        verify(regularPayFixationRepository).closeCurrentFixation(100L, LocalDate.of(2026, 2, 28));
 
         ArgumentCaptor<RegularPayFixation> captor = ArgumentCaptor.forClass(RegularPayFixation.class);
         verify(regularPayFixationRepository).save(captor.capture());

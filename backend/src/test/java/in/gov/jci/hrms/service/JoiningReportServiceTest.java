@@ -4,6 +4,7 @@ import in.gov.jci.hrms.dto.EmployeeMovementRecordResponse;
 import in.gov.jci.hrms.dto.JoiningDecisionRequest;
 import in.gov.jci.hrms.dto.JoiningReportRequest;
 import in.gov.jci.hrms.dto.MovementReleaseRequest;
+import in.gov.jci.hrms.dto.PostIncumbencyRequest;
 import in.gov.jci.hrms.dto.ServiceBookEventRequest;
 import in.gov.jci.hrms.entity.CareerEventType;
 import in.gov.jci.hrms.entity.CityClass;
@@ -14,10 +15,12 @@ import in.gov.jci.hrms.entity.EmployeeMovementRecord;
 import in.gov.jci.hrms.entity.JoiningStatus;
 import in.gov.jci.hrms.entity.LeaveEntitlementBalance;
 import in.gov.jci.hrms.entity.LeaveType;
+import in.gov.jci.hrms.entity.AssignmentType;
 import in.gov.jci.hrms.entity.MovementOrder;
 import in.gov.jci.hrms.entity.MovementOrderType;
 import in.gov.jci.hrms.entity.MovementStatus;
 import in.gov.jci.hrms.entity.PayrollSyncStatus;
+import in.gov.jci.hrms.entity.PostMaster;
 import in.gov.jci.hrms.entity.RegionalOffice;
 import in.gov.jci.hrms.entity.SessionType;
 import in.gov.jci.hrms.entity.TransferNature;
@@ -27,6 +30,8 @@ import in.gov.jci.hrms.repository.EmployeeRepository;
 import in.gov.jci.hrms.repository.LeaveEntitlementBalanceRepository;
 import in.gov.jci.hrms.repository.LeaveLedgerEntryRepository;
 import in.gov.jci.hrms.repository.LeaveTypeRepository;
+import in.gov.jci.hrms.repository.PostIncumbencyRepository;
+import in.gov.jci.hrms.repository.PostMasterRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -46,6 +51,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -71,6 +77,12 @@ class JoiningReportServiceTest {
     private LeaveEntitlementBalanceRepository entitlementBalanceRepository;
     @Mock
     private LeaveLedgerEntryRepository leaveLedgerEntryRepository;
+    @Mock
+    private PostIncumbencyRepository postIncumbencyRepository;
+    @Mock
+    private PostMasterRepository postMasterRepository;
+    @Mock
+    private PostIncumbencyService postIncumbencyService;
 
     private JoiningReportService service;
     private Employee employee;
@@ -84,7 +96,8 @@ class JoiningReportServiceTest {
         service = new JoiningReportService(movementRecordRepository, employeeRepository, dbClockService,
                 new JoiningTimeCalculatorService(), new GeofenceService(), employeeServiceBookService,
                 payrollMovementIntegrationService, leaveTypeRepository, entitlementBalanceRepository, leaveLedgerEntryRepository,
-                new in.gov.jci.hrms.service.pdf.ReleaseOrderPdfGenerator(new in.gov.jci.hrms.service.pdf.PdfHeaderFooterHelper()));
+                new in.gov.jci.hrms.service.pdf.ReleaseOrderPdfGenerator(new in.gov.jci.hrms.service.pdf.PdfHeaderFooterHelper()),
+                postIncumbencyRepository, postMasterRepository, postIncumbencyService);
 
         Department department = new Department("ENG", "Engineering");
         designation = new Designation("Manager");
@@ -269,6 +282,86 @@ class JoiningReportServiceTest {
         assertThat(captor.getValue().eventType()).isEqualTo(CareerEventType.TRANSFER_RELEASE);
     }
 
+    @Test
+    void release_closesTheEmployeesActiveIncumbencyButNeverTouchesTheEmployeesOwnRecord() {
+        MovementOrder order = new MovementOrder(MovementOrderType.TRANSFER, "JCI/Order/2026/01", LocalDate.of(2026, 3, 1));
+        ReflectionTestUtils.setField(order, "id", 100L);
+        EmployeeMovementRecord record = new EmployeeMovementRecord(order, employee, fromOffice, designation, toOffice, designation);
+        ReflectionTestUtils.setField(record, "id", 500L);
+        when(movementRecordRepository.findById(500L)).thenReturn(Optional.of(record));
+        when(dbClockService.now()).thenReturn(Instant.parse("2026-03-10T08:00:00Z"));
+
+        service.release(500L, new MovementReleaseRequest("REL/2026/01", LocalDate.of(2026, 3, 10), SessionType.AFTERNOON));
+
+        // Closes the OUTGOING post's incumbency (keyed by employee, since the movement record itself
+        // carries no postId) - but the CRITICAL INVARIANT is that release() never writes to employees
+        // itself: the employee is still in transit and does not yet hold the new post.
+        verify(postIncumbencyRepository).closeActiveIncumbency(1L, LocalDate.of(2026, 3, 10));
+        verify(employeeRepository, never()).save(any());
+    }
+
+    // ---- Post Incumbency lifecycle + master-data sync on joining approval ----
+
+    @Test
+    void decide_approve_exactlyOneMatchingPost_createsSubstantiveIncumbencyAndSyncsEmployeeMasterData() {
+        EmployeeMovementRecord record = newRecord(MovementOrderType.TRANSFER, TransferNature.ADMINISTRATIVE, true);
+        record.setJoiningDate(LocalDate.of(2026, 3, 16));
+        record.setJoiningSession(SessionType.FORENOON);
+        record.setJoiningReportNo("JRN-001");
+        record.setUnavailedJtDays(0);
+        record.setJoiningStatus(JoiningStatus.PENDING_VERIFICATION);
+        Department toDepartment = new Department("SALES", "Sales");
+        ReflectionTestUtils.setField(toDepartment, "id", 77L);
+        ReflectionTestUtils.setField(record, "toDepartment", toDepartment);
+        ReflectionTestUtils.setField(designation, "id", 5L);
+
+        PostMaster post = new PostMaster("PC-100", "Regional Sales Manager", toDepartment, designation, true);
+        ReflectionTestUtils.setField(post, "id", 900L);
+        post.setRegionalOffice(toOffice);
+        when(postMasterRepository.findByDepartment_IdAndDesignation_IdAndRegionalOffice_Id(77L, 5L, 20L))
+                .thenReturn(List.of(post));
+        when(employeeRepository.findById(1L)).thenReturn(Optional.of(employee));
+
+        service.decide(500L, new JoiningDecisionRequest(true, null), null);
+
+        verify(postIncumbencyRepository).closeActiveIncumbency(1L, LocalDate.of(2026, 3, 16));
+        ArgumentCaptor<PostIncumbencyRequest> requestCaptor = ArgumentCaptor.forClass(PostIncumbencyRequest.class);
+        verify(postIncumbencyService).create(requestCaptor.capture());
+        PostIncumbencyRequest captured = requestCaptor.getValue();
+        assertThat(captured.postId()).isEqualTo(900L);
+        assertThat(captured.employeeId()).isEqualTo(1L);
+        assertThat(captured.assignmentType()).isEqualTo(AssignmentType.SUBSTANTIVE);
+        assertThat(captured.startDate()).isEqualTo(LocalDate.of(2026, 3, 16));
+        assertThat(captured.orderReference()).isEqualTo("JRN-001");
+
+        assertThat(employee.getDesignation()).isEqualTo(designation);
+        assertThat(employee.getDepartment()).isEqualTo(toDepartment);
+        assertThat(employee.getRegionalOffice()).isEqualTo(toOffice);
+        verify(employeeRepository).save(employee);
+    }
+
+    @Test
+    void decide_approve_ambiguousPostMatch_skipsIncumbencySyncWithoutFailingApproval() {
+        EmployeeMovementRecord record = newRecord(MovementOrderType.TRANSFER, TransferNature.ADMINISTRATIVE, true);
+        record.setJoiningDate(LocalDate.of(2026, 3, 16));
+        record.setJoiningSession(SessionType.FORENOON);
+        record.setUnavailedJtDays(0);
+        record.setJoiningStatus(JoiningStatus.PENDING_VERIFICATION);
+        Department toDepartment = new Department("SALES", "Sales");
+        ReflectionTestUtils.setField(toDepartment, "id", 77L);
+        ReflectionTestUtils.setField(record, "toDepartment", toDepartment);
+        ReflectionTestUtils.setField(designation, "id", 5L);
+        // Zero matching sanctioned posts for this destination - nothing unambiguous to link/sync.
+        when(postMasterRepository.findByDepartment_IdAndDesignation_IdAndRegionalOffice_Id(77L, 5L, 20L))
+                .thenReturn(List.of());
+
+        EmployeeMovementRecordResponse response = service.decide(500L, new JoiningDecisionRequest(true, null), null);
+
+        assertThat(response.joiningStatus()).isEqualTo(JoiningStatus.ACCEPTED); // approval itself still succeeds
+        verify(postIncumbencyService, never()).create(any());
+        verify(employeeRepository, never()).save(any());
+    }
+
     // ---- 300-day EL ceiling on approval ----
 
     @Test
@@ -290,6 +383,16 @@ class JoiningReportServiceTest {
         assertThat(response.movementStatus()).isEqualTo(MovementStatus.RELIEVED); // unchanged by decide() itself
         assertThat(response.payrollSyncStatus()).isEqualTo(PayrollSyncStatus.LPC_ISSUED);
         assertThat(response.lpcNumber()).isNotBlank();
+
+        ArgumentCaptor<LeaveEntitlementBalance> balanceCaptor = ArgumentCaptor.forClass(LeaveEntitlementBalance.class);
+        verify(entitlementBalanceRepository, atLeastOnce()).saveAndFlush(balanceCaptor.capture());
+        LeaveEntitlementBalance savedBalance = balanceCaptor.getValue();
+        // The 50:50 encashable/enjoyable split must move in lockstep with currentBalance/availableBalance -
+        // this used to be skipped entirely here, leaving the total ahead of encashableCurrent+enjoyableCurrent.
+        assertThat(savedBalance.getCurrentBalance())
+                .isEqualByComparingTo(savedBalance.getEncashableCurrent().add(savedBalance.getEnjoyableCurrent()));
+        assertThat(savedBalance.getAvailableBalance())
+                .isEqualByComparingTo(savedBalance.getEncashableAvailable().add(savedBalance.getEnjoyableAvailable()));
 
         ArgumentCaptor<ServiceBookEventRequest> captor = ArgumentCaptor.forClass(ServiceBookEventRequest.class);
         verify(employeeServiceBookService, times(2)).recordEvent(eq(1L), captor.capture()); // TRANSFER_JOINING + TRANSFER_BENEFIT_EL_CREDIT

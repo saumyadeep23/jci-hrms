@@ -180,10 +180,11 @@ public class MovementOrderService {
         BigDecimal increment = roundToNearestTen(currentBasic.multiply(DPE_PROMOTION_INCREMENT_RATE));
         BigDecimal fixedBasic = currentBasic.add(increment).max(targetScale.getMinimumBasic()).min(targetScale.getMaximumBasic());
 
-        currentFixation.ifPresent(previous -> {
-            previous.setCurrent(false);
-            previous.setEffectiveTo(request.effectiveDate().minusDays(1));
-        });
+        // Bulk UPDATE, not entity mutation + save - see RegularPayFixationRepository.closeCurrentFixation()'s
+        // own javadoc for the two real Hibernate bugs (flush ordering, lazy-association nulling on merge)
+        // this avoids. currentFixation itself is only read from above (already captured into currentBasic/
+        // incrementCycle before this call), never written back, so its now-stale in-memory state is fine.
+        regularPayFixationRepository.closeCurrentFixation(employee.getId(), request.effectiveDate().minusDays(1));
 
         RegularPayFixation newFixation = new RegularPayFixation(employee, targetScale, fixedBasic, request.effectiveDate());
         newFixation.setFixationReason(FixationReason.PROMOTION);

@@ -6,11 +6,14 @@ import in.gov.jci.hrms.entity.AssignmentType;
 import in.gov.jci.hrms.entity.Department;
 import in.gov.jci.hrms.entity.Designation;
 import in.gov.jci.hrms.entity.Employee;
+import in.gov.jci.hrms.entity.MovementStatus;
 import in.gov.jci.hrms.entity.PostIncumbency;
 import in.gov.jci.hrms.entity.PostMaster;
+import in.gov.jci.hrms.exception.BusinessRuleViolationException;
 import in.gov.jci.hrms.exception.EmployeeNotFoundException;
 import in.gov.jci.hrms.exception.MasterDataNotFoundException;
 import in.gov.jci.hrms.exception.MasterDataValidationException;
+import in.gov.jci.hrms.repository.EmployeeMovementRecordRepository;
 import in.gov.jci.hrms.repository.EmployeeRepository;
 import in.gov.jci.hrms.repository.PostIncumbencyRepository;
 import in.gov.jci.hrms.repository.PostMasterRepository;
@@ -28,6 +31,11 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -42,6 +50,8 @@ class PostIncumbencyServiceTest {
     private PostMasterRepository postMasterRepository;
     @Mock
     private EmployeeRepository employeeRepository;
+    @Mock
+    private EmployeeMovementRecordRepository employeeMovementRecordRepository;
 
     private PostIncumbencyService postIncumbencyService;
 
@@ -50,7 +60,8 @@ class PostIncumbencyServiceTest {
 
     @BeforeEach
     void setUp() {
-        postIncumbencyService = new PostIncumbencyService(postIncumbencyRepository, postMasterRepository, employeeRepository);
+        postIncumbencyService = new PostIncumbencyService(postIncumbencyRepository, postMasterRepository, employeeRepository,
+                employeeMovementRecordRepository);
 
         Department department = new Department("ENG", "Engineering");
         ReflectionTestUtils.setField(department, "id", 10L);
@@ -67,6 +78,12 @@ class PostIncumbencyServiceTest {
 
     private PostIncumbencyRequest validRequest(AssignmentType type, LocalDate startDate) {
         return new PostIncumbencyRequest(POST_ID, EMPLOYEE_ID, type, startDate, null, "ORD/2026/001");
+    }
+
+    /** post has department 10L/designation 20L/no regionalOffice - see setUp(). */
+    private void stubRecordedExitFromPost(boolean exists) {
+        when(employeeMovementRecordRepository.existsReleasedMovementFromPost(eq(EMPLOYEE_ID), eq(10L), eq(20L), isNull(), anyList()))
+                .thenReturn(exists);
     }
 
     @Test
@@ -95,6 +112,7 @@ class PostIncumbencyServiceTest {
         when(postMasterRepository.findById(POST_ID)).thenReturn(Optional.of(post));
         when(employeeRepository.findById(EMPLOYEE_ID)).thenReturn(Optional.of(employee));
         when(postIncumbencyRepository.findByPostIdAndActiveTrue(POST_ID)).thenReturn(List.of(prior));
+        stubRecordedExitFromPost(true);
         when(postIncumbencyRepository.saveAndFlush(any(PostIncumbency.class))).thenAnswer(inv -> {
             PostIncumbency saved = inv.getArgument(0);
             ReflectionTestUtils.setField(saved, "id", 101L);
@@ -103,8 +121,31 @@ class PostIncumbencyServiceTest {
 
         postIncumbencyService.create(validRequest(AssignmentType.SUBSTANTIVE, LocalDate.of(2026, 3, 15)));
 
-        assertThat(prior.isActive()).isFalse();
-        assertThat(prior.getEndDate()).isEqualTo(LocalDate.of(2026, 3, 14));
+        // Closed via a bulk UPDATE now, not by mutating and re-saving the loaded entity - see
+        // PostIncumbencyRepository.closeById()'s own javadoc for why (avoids the same Hibernate
+        // flush-ordering bug RegularPayFixation hit). prior itself is never mutated by create().
+        verify(postIncumbencyRepository).closeById(50L, LocalDate.of(2026, 3, 14));
+    }
+
+    @Test
+    void create_substantiveWithActivePriorSubstantiveButNoRecordedRelease_throwsAndLeavesPriorUntouched() {
+        PostIncumbency prior = new PostIncumbency(post, employee, AssignmentType.SUBSTANTIVE, LocalDate.of(2020, 1, 1));
+        ReflectionTestUtils.setField(prior, "id", 53L);
+
+        when(postMasterRepository.findById(POST_ID)).thenReturn(Optional.of(post));
+        when(employeeRepository.findById(EMPLOYEE_ID)).thenReturn(Optional.of(employee));
+        when(postIncumbencyRepository.findByPostIdAndActiveTrue(POST_ID)).thenReturn(List.of(prior));
+        stubRecordedExitFromPost(false);
+
+        assertThatThrownBy(() -> postIncumbencyService.create(validRequest(AssignmentType.SUBSTANTIVE, LocalDate.of(2026, 3, 15))))
+                .isInstanceOf(BusinessRuleViolationException.class)
+                .hasMessageContaining("PC-001")
+                .hasMessageContaining("not yet relieved");
+
+        assertThat(prior.isActive()).isTrue();
+        assertThat(prior.getEndDate()).isNull();
+        verify(postIncumbencyRepository, never()).closeById(any(), any());
+        verify(postIncumbencyRepository, never()).saveAndFlush(any());
     }
 
     @Test
@@ -115,11 +156,12 @@ class PostIncumbencyServiceTest {
         when(postMasterRepository.findById(POST_ID)).thenReturn(Optional.of(post));
         when(employeeRepository.findById(EMPLOYEE_ID)).thenReturn(Optional.of(employee));
         when(postIncumbencyRepository.findByPostIdAndActiveTrue(POST_ID)).thenReturn(List.of(prior));
+        stubRecordedExitFromPost(true);
         when(postIncumbencyRepository.saveAndFlush(any(PostIncumbency.class))).thenAnswer(inv -> inv.getArgument(0));
 
         postIncumbencyService.create(validRequest(AssignmentType.SUBSTANTIVE, LocalDate.of(2026, 3, 15)));
 
-        assertThat(prior.getEndDate()).isEqualTo(LocalDate.of(2026, 3, 15));
+        verify(postIncumbencyRepository).closeById(51L, LocalDate.of(2026, 3, 15));
     }
 
     @Test

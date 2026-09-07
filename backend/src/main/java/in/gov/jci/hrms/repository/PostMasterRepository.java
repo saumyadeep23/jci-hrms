@@ -69,4 +69,14 @@ public interface PostMasterRepository extends JpaRepository<PostMaster, Long> {
 
     /** DoaResolverService's override-routing keyword lookup (e.g. "Managing Director", "Chief Vigilance Officer") - see its javadoc for why this is a best-effort title match, not a structured role lookup. */
     java.util.List<PostMaster> findByTitleContainingIgnoreCase(String titleFragment);
+
+    /**
+     * JoiningReportService's movement-to-post resolution: EmployeeMovementRecord itself carries no
+     * postId (Movement Orders and the Post Incumbency ledger are otherwise two independent subsystems -
+     * the Edit Employee "Vacant Sanctioned Post" picker is the only other place a post gets linked to an
+     * employee today), so a joining's destination (department/designation/regionalOffice) is matched
+     * against this table instead. Returns whatever matches, including zero or more than one - the
+     * caller only acts when exactly one sanctioned post exists for that combination.
+     */
+    java.util.List<PostMaster> findByDepartment_IdAndDesignation_IdAndRegionalOffice_Id(Long departmentId, Long designationId, Long regionalOfficeId);
 }
