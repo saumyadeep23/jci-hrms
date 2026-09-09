@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { isAxiosError } from 'axios'
 import { apiClient } from '../../api/client'
@@ -16,10 +16,22 @@ import type {
 type CombinedMode = 'contiguous' | 'same-day'
 type RhPlacement = 'prefix' | 'suffix'
 
+/**
+ * Pure calendar-date arithmetic - deliberately never touches local time.
+ * `new Date(iso + 'T00:00:00')` followed by `.toISOString()` is NOT safe for
+ * this: it builds a LOCAL-midnight Date, and toISOString() converts that to
+ * UTC, which lands on the PREVIOUS calendar day for any positive UTC offset
+ * (IST is UTC+5:30) - e.g. addDays('2026-09-15', 1) silently returned
+ * '2026-09-15' instead of '2026-09-16' for every browser running in IST.
+ * Using Date.UTC/getUTCDate/setUTCDate throughout keeps the whole
+ * computation in one timezone (UTC) so it never crosses a local/UTC
+ * boundary.
+ */
 function addDays(iso: string, days: number): string {
   if (!iso) return ''
-  const date = new Date(iso + 'T00:00:00')
-  date.setDate(date.getDate() + days)
+  const [year, month, day] = iso.split('-').map(Number)
+  const date = new Date(Date.UTC(year, month - 1, day))
+  date.setUTCDate(date.getUTCDate() + days)
   return date.toISOString().slice(0, 10)
 }
 
@@ -53,13 +65,28 @@ export function CombinedLeaveApplicationForm({ employeeId, onSaved }: { employee
     mode === 'same-day' ? sameDayDate : placement === 'prefix' ? addDays(clStartDate, -1) : addDays(clEndDate, 1)
   const rhSession: LeaveSession = mode === 'same-day' ? (clSession === 'FIRST_HALF' ? 'SECOND_HALF' : 'FIRST_HALF') : 'FULL_DAY'
 
+  const rhYear = rhDate ? Number(rhDate.slice(0, 4)) : new Date().getFullYear()
   const holidaysQuery = useQuery({
-    queryKey: ['holidays-restricted-for-combined'],
-    queryFn: async () => (await apiClient.get<Page<HolidayResponse>>('/holidays', { params: { size: 300 } })).data.content,
+    queryKey: ['holidays-my-restricted-for-combined', rhYear],
+    // Scoped to the caller's own posting location (HolidayController.getMyRestrictedHolidays) -
+    // an unscoped /holidays fetch would return every state's own row for the same festival
+    // (e.g. Ganesh Chaturthi published once per state), showing as several duplicate-looking entries.
+    queryFn: async () => (await apiClient.get<HolidayResponse[]>('/holidays/my-restricted', { params: { year: rhYear } })).data,
     enabled: Boolean(rhDate),
   })
-  const restrictedHolidayOptions = (holidaysQuery.data ?? []).filter((h) => h.holidayType === 'RESTRICTED')
+  // Belt-and-braces dedup by (date, id) in case the same holiday id is ever returned twice.
+  const restrictedHolidayOptions = Array.from(
+    new Map((holidaysQuery.data ?? []).map((h) => [`${h.id}-${h.holidayDate}`, h])).values(),
+  )
   const matchingHoliday = restrictedHolidayOptions.find((h) => h.holidayDate === rhDate)
+
+  // Auto-select the RH that actually falls on the computed target date whenever that date
+  // (or the loaded RH list) changes, and clear it if the new date has no match - so a stale
+  // selection from a previous date never silently rides along on submit.
+  useEffect(() => {
+    setRhHolidayId(matchingHoliday ? String(matchingHoliday.id) : '')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rhDate, holidaysQuery.data])
 
   const combineMutation = useMutation({
     mutationFn: async () => {

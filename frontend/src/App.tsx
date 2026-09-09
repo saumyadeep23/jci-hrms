@@ -18,6 +18,7 @@ import { EmployeeDirectoryPage } from './pages/hr/EmployeeDirectoryPage'
 import { LeaveSanctionQueuePage } from './pages/hr/LeaveSanctionQueuePage'
 import { RegularizationApprovalQueuePage } from './pages/hr/RegularizationApprovalQueuePage'
 import { LeaveEncashmentPage } from './pages/ess/LeaveEncashmentPage'
+import { CeaClaimsPage } from './pages/ess/CeaClaimsPage'
 import { LeaveBaselineTakeOnPage } from './pages/admin/LeaveBaselineTakeOnPage'
 import { AparCycleManagementPage } from './pages/hr/AparCycleManagementPage'
 import { LegacyMigrationPage } from './pages/hr/LegacyMigrationPage'
@@ -42,11 +43,23 @@ import { DutyRosterPage } from './pages/admin/attendance/DutyRosterPage'
 import { HolidayMasterPage } from './pages/admin/master/HolidayMasterPage'
 import { FunctionalRolesMasterPage } from './pages/admin/master/FunctionalRolesMasterPage'
 import { MovementManagementPage } from './pages/admin/pims/MovementManagementPage'
+import { PayrollMastersPage } from './pages/admin/master/payroll/PayrollMastersPage'
+import { NpsDeclarationDeskPage } from './pages/hr/NpsDeclarationDeskPage'
+import { NpsComplianceDashboardPage } from './pages/admin/payroll/NpsComplianceDashboardPage'
+import { IncomingTransfersPage } from './pages/payroll/trust/IncomingTransfersPage'
+import { CpfPassbookView } from './pages/payroll/trust/CpfPassbookView'
+import { CpfInterestRateEntryPage } from './pages/payroll/trust/CpfInterestRateEntryPage'
+import { CpfMembersListPage } from './pages/payroll/trust/CpfMembersListPage'
+import { CpfLoansPage } from './pages/payroll/trust/loans/CpfLoansPage'
 
 const HR_ROLES: Role[] = ['HR_ADMIN', 'SUPER_ADMIN']
 const FINANCE_ROLES: Role[] = ['FINANCE_ADMIN', 'SUPER_ADMIN']
 const SUPER_ADMIN_ROLES: Role[] = ['SUPER_ADMIN']
 const ALMS_REPORT_ROLES: Role[] = ['HR_ADMIN', 'FINANCE_ADMIN', 'SUPER_ADMIN']
+/** Matches CpfTrustController/CpfLoanController's own @PreAuthorize exactly. */
+const CPF_TRUST_ROLES: Role[] = ['FINANCE_ADMIN', 'CPF_ADMIN', 'SUPER_ADMIN']
+/** Matches PayrollMasterController's own @PreAuthorize exactly (no SUPER_ADMIN bypass there, so none here either). */
+const PAYROLL_MASTER_ROLES: Role[] = ['HR_ADMIN', 'BILL_SUPERVISOR', 'FINANCE_ADMIN']
 
 function Protected({ children, roles }: { children: React.ReactNode; roles?: Role[] }) {
   return (
@@ -72,6 +85,7 @@ function App() {
       <Route path="/my-transfers" element={<Protected><MyTransfersPage /></Protected>} />
       <Route path="/leaves" element={<Protected><LeavePage /></Protected>} />
       <Route path="/self-service/leave/encashment" element={<Protected><LeaveEncashmentPage /></Protected>} />
+      <Route path="/self-service/cea-claims" element={<Protected><CeaClaimsPage /></Protected>} />
       <Route path="/loans" element={<Protected><LoansPage /></Protected>} />
       <Route path="/apar" element={<Protected><AparSelfAppraisalPage /></Protected>} />
 
@@ -90,12 +104,26 @@ function App() {
       <Route path="/admin/master/holidays" element={<Protected roles={HR_ROLES}><HolidayMasterPage /></Protected>} />
       <Route path="/admin/master/functional-roles" element={<Protected roles={HR_ROLES}><FunctionalRolesMasterPage /></Protected>} />
       <Route path="/admin/pims/movements" element={<Protected roles={HR_ROLES}><MovementManagementPage /></Protected>} />
+      <Route path="/admin/payroll/masters" element={<Protected roles={PAYROLL_MASTER_ROLES}><PayrollMastersPage /></Protected>} />
+      {/* HRA Rates is a tab of PayrollMastersPage (?tab= deep-linking, same pattern as MasterDataConsolePage) - this route is just a friendlier bookmarkable alias for it. */}
+      <Route path="/admin/payroll/masters/hra-rates" element={<Navigate to="/admin/payroll/masters?tab=hra-rates" replace />} />
+      {/* Statutory Parameters is also a tab of PayrollMastersPage - same bookmarkable-alias pattern as HRA Rates above. */}
+      <Route path="/admin/payroll/masters/statutory-parameters" element={<Navigate to="/admin/payroll/masters?tab=statutory-parameters" replace />} />
+      {/* DA Rate Manager stays the same page/route/role-gate as before (FINANCE_ROLES) - this alias only changes where it's reachable from in the nav tree, not who can reach it. */}
+      <Route path="/admin/payroll/masters/da-rates" element={<Navigate to="/da-rates" replace />} />
+      <Route path="/hr/nps-declarations" element={<Protected roles={PAYROLL_MASTER_ROLES}><NpsDeclarationDeskPage /></Protected>} />
+      <Route path="/admin/payroll/nps-declarations" element={<Protected roles={PAYROLL_MASTER_ROLES}><NpsComplianceDashboardPage /></Protected>} />
       <Route path="/apar-cycles" element={<Protected roles={HR_ROLES}><AparCycleManagementPage /></Protected>} />
       <Route path="/migration" element={<Protected roles={HR_ROLES}><LegacyMigrationPage /></Protected>} />
       <Route path="/disciplinary" element={<Protected roles={HR_ROLES}><DisciplinaryTrackerPage /></Protected>} />
 
       <Route path="/da-rates" element={<Protected roles={FINANCE_ROLES}><DaRateHistoryPage /></Protected>} />
       <Route path="/payroll" element={<Protected roles={FINANCE_ROLES}><PayrollRunsPage /></Protected>} />
+      <Route path="/payroll/trust/members" element={<Protected roles={CPF_TRUST_ROLES}><CpfMembersListPage /></Protected>} />
+      <Route path="/payroll/trust/passbook" element={<Protected roles={CPF_TRUST_ROLES}><CpfPassbookView /></Protected>} />
+      <Route path="/payroll/trust/interest-rates" element={<Protected roles={CPF_TRUST_ROLES}><CpfInterestRateEntryPage /></Protected>} />
+      <Route path="/payroll/trust/incoming-transfers" element={<Protected roles={CPF_TRUST_ROLES}><IncomingTransfersPage /></Protected>} />
+      <Route path="/payroll/trust/loans" element={<Protected roles={CPF_TRUST_ROLES}><CpfLoansPage /></Protected>} />
 
       <Route path="/audit-logs" element={<Protected roles={SUPER_ADMIN_ROLES}><AuditLogViewerPage /></Protected>} />
       {/* Widened from SUPER_ADMIN-only: PostMasterController and every master this console edits (besides states/districts, gated within the page itself) already accept HR_ADMIN at the API level - see nav-config.ts's NAV_ENTRIES comment. */}

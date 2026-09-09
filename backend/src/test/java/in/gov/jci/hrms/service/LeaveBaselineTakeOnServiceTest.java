@@ -102,16 +102,44 @@ class LeaveBaselineTakeOnServiceTest {
     }
 
     @Test
-    void takeOn_withUnequalElSplit_throws() {
+    void takeOn_withUnequalButValidElSplit_succeeds() {
         EmployeeEmploymentCategory category = new EmployeeEmploymentCategory(employee, EmploymentCategory.REGULAR);
         when(employmentCategoryRepository.findByEmployeeId(1L)).thenReturn(Optional.of(category));
 
         BaselineTakeOnRequest request = new BaselineTakeOnRequest(1L, 2L, LocalDate.of(2026, 1, 1),
-                new BigDecimal("100.00"), new BigDecimal("60.00"), new BigDecimal("40.00"), null, null);
+                new BigDecimal("123.00"), new BigDecimal("8.00"), new BigDecimal("115.00"), "Folio-1", "Order-1");
+
+        BaselineTakeOnResponse response = service.takeOn(request);
+
+        assertThat(response.openingEncashableEl()).isEqualByComparingTo("8.00");
+        assertThat(response.openingEnjoyableEl()).isEqualByComparingTo("115.00");
+    }
+
+    @Test
+    void takeOn_withElSplitNotSummingToOpeningBalance_throws() {
+        EmployeeEmploymentCategory category = new EmployeeEmploymentCategory(employee, EmploymentCategory.REGULAR);
+        when(employmentCategoryRepository.findByEmployeeId(1L)).thenReturn(Optional.of(category));
+
+        BaselineTakeOnRequest request = new BaselineTakeOnRequest(1L, 2L, LocalDate.of(2026, 1, 1),
+                new BigDecimal("100.00"), new BigDecimal("60.00"), new BigDecimal("30.00"), null, null);
 
         assertThatThrownBy(() -> service.takeOn(request))
                 .isInstanceOf(BusinessRuleViolationException.class)
-                .hasMessageContaining("50:50");
+                .hasMessageContaining("opening_balance");
+    }
+
+    @Test
+    void takeOn_withEncashableExceedingStatutoryCap_throws() {
+        EmployeeEmploymentCategory category = new EmployeeEmploymentCategory(employee, EmploymentCategory.REGULAR);
+        when(employmentCategoryRepository.findByEmployeeId(1L)).thenReturn(Optional.of(category));
+        elType.setMaxAccumulationDays(null);
+
+        BaselineTakeOnRequest request = new BaselineTakeOnRequest(1L, 2L, LocalDate.of(2026, 1, 1),
+                new BigDecimal("305.00"), new BigDecimal("305.00"), BigDecimal.ZERO, null, null);
+
+        assertThatThrownBy(() -> service.takeOn(request))
+                .isInstanceOf(BusinessRuleViolationException.class)
+                .hasMessageContaining("statutory EL encashment cap");
     }
 
     @Test

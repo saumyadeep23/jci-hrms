@@ -77,7 +77,13 @@ public class SecurityConfig {
         configuration.setAllowedOriginPatterns(List.of(
                 "http://localhost:5173",
                 "http://127.0.0.1:5173",
-                "http://localhost:3000"));
+                "http://localhost:3000",
+                // LAN access for real-device testing (e.g. the mobile punch flow's camera/geolocation,
+                // which needs a genuine phone browser, not just responsive-mode devtools) - a wildcard
+                // pattern for the whole home/office subnet rather than one hardcoded dev machine IP, since
+                // that IP changes across networks/DHCP leases. HTTPS only: mixed content would block API
+                // calls from an HTTPS frontend page anyway once server.ssl.enabled is turned on for this.
+                "https://192.168.31.*:5173"));
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
         configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"));
         // Without this, the browser JS can't read these response headers cross-origin -

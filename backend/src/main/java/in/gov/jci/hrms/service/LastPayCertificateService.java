@@ -11,6 +11,7 @@ import in.gov.jci.hrms.entity.LeaveType;
 import in.gov.jci.hrms.entity.LoanStatus;
 import in.gov.jci.hrms.entity.LoanTypeCode;
 import in.gov.jci.hrms.entity.MovementLpcRecord;
+import in.gov.jci.hrms.entity.RegularPayFixation;
 import in.gov.jci.hrms.exception.BusinessRuleViolationException;
 import in.gov.jci.hrms.exception.MasterDataNotFoundException;
 import in.gov.jci.hrms.repository.EmployeeEmploymentCategoryRepository;
@@ -21,6 +22,7 @@ import in.gov.jci.hrms.repository.LeaveBalanceRepository;
 import in.gov.jci.hrms.repository.LeaveEntitlementBalanceRepository;
 import in.gov.jci.hrms.repository.LeaveTypeRepository;
 import in.gov.jci.hrms.repository.MovementLpcRecordRepository;
+import in.gov.jci.hrms.repository.RegularPayFixationRepository;
 import in.gov.jci.hrms.service.pdf.LastPayCertificatePdfGenerator;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -56,6 +58,7 @@ public class LastPayCertificateService {
     private final LeaveEntitlementBalanceRepository entitlementBalanceRepository;
     private final LeaveBalanceRepository leaveBalanceRepository;
     private final PayrollComputationService payrollComputationService;
+    private final RegularPayFixationRepository regularPayFixationRepository;
     private final LastPayCertificatePdfGenerator pdfGenerator;
 
     public LastPayCertificateService(MovementLpcRecordRepository lpcRecordRepository,
@@ -64,6 +67,7 @@ public class LastPayCertificateService {
                                       EmployeeLoanRepository employeeLoanRepository, LeaveTypeRepository leaveTypeRepository,
                                       LeaveEntitlementBalanceRepository entitlementBalanceRepository,
                                       LeaveBalanceRepository leaveBalanceRepository, PayrollComputationService payrollComputationService,
+                                      RegularPayFixationRepository regularPayFixationRepository,
                                       LastPayCertificatePdfGenerator pdfGenerator) {
         this.lpcRecordRepository = lpcRecordRepository;
         this.movementRecordRepository = movementRecordRepository;
@@ -74,6 +78,7 @@ public class LastPayCertificateService {
         this.entitlementBalanceRepository = entitlementBalanceRepository;
         this.leaveBalanceRepository = leaveBalanceRepository;
         this.payrollComputationService = payrollComputationService;
+        this.regularPayFixationRepository = regularPayFixationRepository;
         this.pdfGenerator = pdfGenerator;
     }
 
@@ -110,7 +115,12 @@ public class LastPayCertificateService {
         Employee employee = movement.getEmployee();
 
         BigDecimal basicPay = currentBasicPay(employee);
-        var scaleType = employee.getPayScale() != null ? employee.getPayScale().getScaleType() : null;
+        // V60: employee.getPayScale()/pay_scale_master is gone - resolve via the employee's
+        // current regular_pay_fixations row instead, same graceful "no fixation -> DA 0" fallback.
+        var scaleType = regularPayFixationRepository.findByEmployeeIdAndCurrentTrue(employee.getId())
+                .map(RegularPayFixation::getGradeScale)
+                .map(gradeScale -> gradeScale.getScaleType())
+                .orElse(null);
         BigDecimal daPercentage = scaleType != null
                 ? payrollComputationService.resolveDaPercentage(scaleType, movement.getReleaseDate())
                 : BigDecimal.ZERO;

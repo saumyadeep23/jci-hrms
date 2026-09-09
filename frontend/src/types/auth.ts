@@ -5,6 +5,8 @@ export type Role =
   | 'CPF_ADMIN'
   | 'COOP_ADMIN'
   | 'SUPER_ADMIN'
+  /** JCI Payroll Engine master screens (PayrollMasterController) - see its own @PreAuthorize. */
+  | 'BILL_SUPERVISOR'
 
 export interface DecodedToken {
   sub?: string

@@ -59,7 +59,7 @@ class EmployeeOnboardingControllerTest {
     private OnboardingPersonalDetailsRequest personal() {
         return new OnboardingPersonalDetailsRequest(
                 Salutation.MS, "Asha", null, "Rao", Gender.FEMALE, LocalDate.of(1990, 5, 1), MaritalStatus.SINGLE, null,
-                "Indian", null, "ABCDE1234F", "CPF00001", "123456789012", "asha.rao@example.com", null, "9876543210", null);
+                "Indian", null, "ABCDE1234F", "CPF00001", null, "123456789012", "asha.rao@example.com", null, "9876543210", null);
     }
 
     @Test

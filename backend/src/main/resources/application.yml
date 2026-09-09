@@ -1,5 +1,15 @@
 server:
   port: 8080
+  # Off by default so `mvn spring-boot:run` keeps working with zero setup for anyone without a local
+  # mkcert cert (certs/ is gitignored, machine-specific). Set SERVER_SSL_ENABLED=true to serve HTTPS with
+  # the mkcert-generated keystore below - needed so a phone's camera/geolocation APIs (secure-context-only,
+  # and localhost's usual exception doesn't cover a LAN address) work when testing the mobile punch flow.
+  ssl:
+    enabled: ${SERVER_SSL_ENABLED:false}
+    key-store: ${SERVER_SSL_KEY_STORE:file:../certs/dev-keystore.p12}
+    key-store-password: ${SERVER_SSL_KEY_STORE_PASSWORD:changeit}
+    key-store-type: PKCS12
+    key-alias: jci-hrms-dev
 
 spring:
   application:

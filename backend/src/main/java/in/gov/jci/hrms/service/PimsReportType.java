@@ -9,5 +9,7 @@ public enum PimsReportType {
     APAR_MATRIX,
     INCREMENT_DUE_LIST,
     AD_HOC,
-    SEPARATED_STAFF
+    SEPARATED_STAFF,
+    DEPUTED_STAFF,
+    SUSPENDED_STAFF
 }

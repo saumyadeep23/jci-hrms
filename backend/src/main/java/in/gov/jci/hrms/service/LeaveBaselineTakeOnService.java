@@ -28,16 +28,21 @@ import java.math.BigDecimal;
  * The one-time HR opening-balance verification (PIMS ALMS Phase 2, Section 1):
  * validates the employee is REGULAR (EmployeeEmploymentCategory, not
  * Employee.status - see the Phase 2 research note on why those are distinct
- * concepts), the EL 50:50 encashable/enjoyable split, and the leave type's
- * own career/accumulation cap, then writes the baseline record, seeds
- * leave_entitlement_balance, and records an immutable BASELINE_TAKEON ledger
- * entry - all in one transaction so the three can never drift out of sync.
+ * concepts), that the EL encashable/enjoyable split is internally consistent
+ * (both non-negative, summing to the opening balance, encashable within the
+ * 300-day statutory encashment cap - NOT required to be an even 50:50 split;
+ * real service-book carry-forwards are frequently uneven, e.g. 8/115), and
+ * the leave type's own career/accumulation cap, then writes the baseline
+ * record, seeds leave_entitlement_balance, and records an immutable
+ * BASELINE_TAKEON ledger entry - all in one transaction so the three can
+ * never drift out of sync.
  */
 @Service
 @Transactional(readOnly = true)
 public class LeaveBaselineTakeOnService {
 
     private static final BigDecimal SPLIT_EPSILON = new BigDecimal("0.01");
+    private static final BigDecimal MAX_ENCASHABLE_EL = new BigDecimal("300");
 
     private final LeaveBaselineInitializationRepository baselineRepository;
     private final LeaveEntitlementBalanceRepository entitlementBalanceRepository;
@@ -74,7 +79,7 @@ public class LeaveBaselineTakeOnService {
         BigDecimal enjoyable = isEl && request.openingEnjoyableEl() != null ? request.openingEnjoyableEl() : BigDecimal.ZERO;
 
         if (isEl) {
-            validateFiftyFiftySplit(request.openingBalance(), encashable, enjoyable);
+            validateElSplit(request.openingBalance(), encashable, enjoyable);
         }
         validateAccumulationCap(leaveType, request.openingBalance());
 
@@ -113,16 +118,20 @@ public class LeaveBaselineTakeOnService {
         }
     }
 
-    private void validateFiftyFiftySplit(BigDecimal openingBalance, BigDecimal encashable, BigDecimal enjoyable) {
-        if (encashable.subtract(enjoyable).abs().compareTo(SPLIT_EPSILON) > 0) {
+    private void validateElSplit(BigDecimal openingBalance, BigDecimal encashable, BigDecimal enjoyable) {
+        if (encashable.signum() < 0 || enjoyable.signum() < 0) {
             throw new BusinessRuleViolationException(
-                    "Opening EL balance must split exactly 50:50 between encashable and enjoyable - got "
+                    "opening_encashable_el and opening_enjoyable_el must both be non-negative - got "
                             + encashable + "/" + enjoyable);
         }
         if (encashable.add(enjoyable).subtract(openingBalance).abs().compareTo(SPLIT_EPSILON) > 0) {
             throw new BusinessRuleViolationException(
                     "opening_encashable_el + opening_enjoyable_el (" + encashable.add(enjoyable)
                             + ") must equal opening_balance (" + openingBalance + ") for EL");
+        }
+        if (encashable.compareTo(MAX_ENCASHABLE_EL) > 0) {
+            throw new BusinessRuleViolationException(
+                    "opening_encashable_el (" + encashable + ") exceeds the " + MAX_ENCASHABLE_EL + "-day statutory EL encashment cap");
         }
     }
 

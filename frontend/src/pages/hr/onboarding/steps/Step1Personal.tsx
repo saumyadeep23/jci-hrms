@@ -208,6 +208,17 @@ export function Step1Personal({
         <p className="mt-1 text-[11px] text-slate-400">Only fill this in for an existing legacy PF ledger number - otherwise the next number is assigned automatically.</p>
       </div>
       <div>
+        <label className="mb-1 block text-xs font-medium text-slate-600">UAN (Universal Account Number)</label>
+        <input
+          maxLength={12}
+          inputMode="numeric"
+          value={value.uanNo ?? ''}
+          onChange={(e) => onChange({ ...value, uanNo: e.target.value.replace(/\D/g, '').slice(0, 12) })}
+          className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+          placeholder="e.g. 101234567890"
+        />
+      </div>
+      <div>
         <label className="mb-1 block text-xs font-medium text-slate-600">Aadhaar Number</label>
         <input
           maxLength={12}

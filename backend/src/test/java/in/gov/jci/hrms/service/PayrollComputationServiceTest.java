@@ -2,6 +2,7 @@ package in.gov.jci.hrms.service;
 
 import in.gov.jci.hrms.config.PayrollRateProperties;
 import in.gov.jci.hrms.entity.AttendanceStatus;
+import in.gov.jci.hrms.entity.Cadre;
 import in.gov.jci.hrms.entity.CityClass;
 import in.gov.jci.hrms.entity.DaRateHistory;
 import in.gov.jci.hrms.entity.DailyAttendance;
@@ -9,14 +10,16 @@ import in.gov.jci.hrms.entity.Department;
 import in.gov.jci.hrms.entity.Designation;
 import in.gov.jci.hrms.entity.Employee;
 import in.gov.jci.hrms.entity.EmployeeStatus;
-import in.gov.jci.hrms.entity.PayScale;
+import in.gov.jci.hrms.entity.GradeScaleMaster;
 import in.gov.jci.hrms.entity.PayrollRun;
 import in.gov.jci.hrms.entity.RegionalOffice;
+import in.gov.jci.hrms.entity.RegularPayFixation;
 import in.gov.jci.hrms.entity.ScaleType;
 import in.gov.jci.hrms.exception.BusinessRuleViolationException;
 import in.gov.jci.hrms.repository.DaRateHistoryRepository;
 import in.gov.jci.hrms.repository.DailyAttendanceRepository;
 import in.gov.jci.hrms.repository.EmployeeSuperannuationDetailsRepository;
+import in.gov.jci.hrms.repository.RegularPayFixationRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -42,6 +45,8 @@ class PayrollComputationServiceTest {
     private DaRateHistoryRepository daRateHistoryRepository;
     @Mock
     private EmployeeSuperannuationDetailsRepository superannuationDetailsRepository;
+    @Mock
+    private RegularPayFixationRepository regularPayFixationRepository;
 
     private PayrollRateProperties rateProperties;
     private PayrollComputationService payrollComputationService;
@@ -57,23 +62,24 @@ class PayrollComputationServiceTest {
         rateProperties.setHraPercentZ(new BigDecimal("8.00"));
         rateProperties.setTransportAllowanceBase(new BigDecimal("1600.00"));
 
-        payrollComputationService = new PayrollComputationService(dailyAttendanceRepository, daRateHistoryRepository, rateProperties, superannuationDetailsRepository);
+        payrollComputationService = new PayrollComputationService(dailyAttendanceRepository, daRateHistoryRepository,
+                rateProperties, superannuationDetailsRepository, regularPayFixationRepository);
 
         department = new Department("ENG", "Engineering");
         designation = new Designation("Manager");
     }
 
-    private PayScale payScale(ScaleType scaleType, String minimumBasic) {
-        PayScale payScale = new PayScale(scaleType, "E2", new BigDecimal(minimumBasic), new BigDecimal("80000.00"),
-                new BigDecimal("3.00"), true);
-        return payScale;
+    private GradeScaleMaster gradeScale(ScaleType scaleType, String minimumBasic) {
+        GradeScaleMaster gradeScale = new GradeScaleMaster("E2", Cadre.EXECUTIVE, 2, false,
+                new BigDecimal(minimumBasic), new BigDecimal("80000.00"));
+        gradeScale.setScaleType(scaleType);
+        return gradeScale;
     }
 
-    private Employee employeeWith(PayScale payScale, RegionalOffice regionalOffice, EmployeeStatus status) {
+    private Employee employeeWith(RegionalOffice regionalOffice, EmployeeStatus status) {
         Employee employee = new Employee("EMP-001", "Asha", "Rao", "asha.rao@example.com",
                 LocalDate.of(2020, 1, 15), department, designation);
         ReflectionTestUtils.setField(employee, "id", 1L);
-        employee.setPayScale(payScale);
         employee.setRegionalOffice(regionalOffice);
         employee.setStatus(status);
         return employee;
@@ -131,7 +137,7 @@ class PayrollComputationServiceTest {
     }
 
     private DailyAttendance attendanceOn(LocalDate date, AttendanceStatus status) {
-        Employee employee = employeeWith(payScale(ScaleType.IDA, "50000.00"), null, EmployeeStatus.ACTIVE);
+        Employee employee = employeeWith(null, EmployeeStatus.ACTIVE);
         return new DailyAttendance(employee, date, status);
     }
 
@@ -139,9 +145,9 @@ class PayrollComputationServiceTest {
 
     @Test
     void computeBasicPay_withNoLop_equalsFullPayScaleMinimum() {
-        Employee employee = employeeWith(payScale(ScaleType.IDA, "50000.00"), null, EmployeeStatus.ACTIVE);
+        GradeScaleMaster gradeScale = gradeScale(ScaleType.IDA, "50000.00");
 
-        BigDecimal basicPay = payrollComputationService.computeBasicPay(employee,
+        BigDecimal basicPay = payrollComputationService.computeBasicPay(gradeScale,
                 LocalDate.of(2026, 7, 26), LocalDate.of(2026, 8, 25), BigDecimal.ZERO);
 
         assertThat(basicPay).isEqualByComparingTo("50000.00");
@@ -150,21 +156,24 @@ class PayrollComputationServiceTest {
     @Test
     void computeBasicPay_withLopDays_proratesByPayableOverTotalDays() {
         // 31-day cycle, 3.5 LOP days -> 27.5 payable / 31 total.
-        Employee employee = employeeWith(payScale(ScaleType.IDA, "31000.00"), null, EmployeeStatus.ACTIVE);
+        GradeScaleMaster gradeScale = gradeScale(ScaleType.IDA, "31000.00");
 
-        BigDecimal basicPay = payrollComputationService.computeBasicPay(employee,
+        BigDecimal basicPay = payrollComputationService.computeBasicPay(gradeScale,
                 LocalDate.of(2026, 7, 26), LocalDate.of(2026, 8, 25), new BigDecimal("3.5"));
 
         // 31000 * 27.5 / 31 = 27500.00
         assertThat(basicPay).isEqualByComparingTo("27500.00");
     }
 
-    @Test
-    void computeBasicPay_whenNoPayScaleAssigned_throwsBusinessRuleViolationException() {
-        Employee employee = employeeWith(null, null, EmployeeStatus.ACTIVE);
+    // ---- resolveCurrentGradeScale / compute's dependency on it ----
 
-        assertThatThrownBy(() -> payrollComputationService.computeBasicPay(employee,
-                LocalDate.of(2026, 7, 26), LocalDate.of(2026, 8, 25), BigDecimal.ZERO))
+    @Test
+    void compute_whenNoCurrentPayFixation_throwsBusinessRuleViolationException() {
+        Employee employee = employeeWith(null, EmployeeStatus.ACTIVE);
+        when(regularPayFixationRepository.findByEmployeeIdAndCurrentTrue(1L)).thenReturn(Optional.empty());
+        PayrollRun run = new PayrollRun(2026, 8, LocalDate.of(2026, 7, 26), LocalDate.of(2026, 8, 25));
+
+        assertThatThrownBy(() -> payrollComputationService.compute(employee, run))
                 .isInstanceOf(BusinessRuleViolationException.class);
     }
 
@@ -204,14 +213,14 @@ class PayrollComputationServiceTest {
 
     @Test
     void resolveCityClass_withRegionalOfficeAssigned_returnsItsCityClass() {
-        Employee employee = employeeWith(payScale(ScaleType.IDA, "50000.00"), regionalOffice(CityClass.Y), EmployeeStatus.ACTIVE);
+        Employee employee = employeeWith(regionalOffice(CityClass.Y), EmployeeStatus.ACTIVE);
 
         assertThat(payrollComputationService.resolveCityClass(employee)).isEqualTo(CityClass.Y);
     }
 
     @Test
     void resolveCityClass_withoutRegionalOffice_defaultsToZ() {
-        Employee employee = employeeWith(payScale(ScaleType.IDA, "50000.00"), null, EmployeeStatus.ACTIVE);
+        Employee employee = employeeWith(null, EmployeeStatus.ACTIVE);
 
         assertThat(payrollComputationService.resolveCityClass(employee)).isEqualTo(CityClass.Z);
     }
@@ -220,8 +229,6 @@ class PayrollComputationServiceTest {
 
     @Test
     void computeHouseRentAllowance_appliesCorrectPercentPerCityClass() {
-        BigDecimal basicPlusDa = new BigDecimal("58500.00"); // 50000 basic + 8500 DA
-
         assertThat(payrollComputationService.computeHouseRentAllowance(new BigDecimal("50000.00"), new BigDecimal("8500.00"), CityClass.X))
                 .isEqualByComparingTo("14040.00");
         assertThat(payrollComputationService.computeHouseRentAllowance(new BigDecimal("50000.00"), new BigDecimal("8500.00"), CityClass.Y))
@@ -269,14 +276,14 @@ class PayrollComputationServiceTest {
 
     @Test
     void isSalaryHeld_forActiveEmployee_isFalse() {
-        Employee employee = employeeWith(payScale(ScaleType.IDA, "50000.00"), null, EmployeeStatus.ACTIVE);
+        Employee employee = employeeWith(null, EmployeeStatus.ACTIVE);
 
         assertThat(payrollComputationService.isSalaryHeld(employee)).isFalse();
     }
 
     @Test
     void isSalaryHeld_forTerminatedEmployee_isTrue() {
-        Employee employee = employeeWith(payScale(ScaleType.IDA, "50000.00"), null, EmployeeStatus.TERMINATED);
+        Employee employee = employeeWith(null, EmployeeStatus.TERMINATED);
 
         assertThat(payrollComputationService.isSalaryHeld(employee)).isTrue();
     }
@@ -285,11 +292,13 @@ class PayrollComputationServiceTest {
 
     @Test
     void compute_aggregatesAllFormulasCorrectly() {
-        Employee employee = employeeWith(payScale(ScaleType.IDA, "50000.00"), regionalOffice(CityClass.X), EmployeeStatus.ACTIVE);
-        ReflectionTestUtils.setField(employee, "id", 1L);
+        Employee employee = employeeWith(regionalOffice(CityClass.X), EmployeeStatus.ACTIVE);
+        GradeScaleMaster gradeScale = gradeScale(ScaleType.IDA, "50000.00");
+        RegularPayFixation fixation = new RegularPayFixation(employee, gradeScale, new BigDecimal("50000.00"), LocalDate.of(2020, 1, 15));
 
         PayrollRun run = new PayrollRun(2026, 8, LocalDate.of(2026, 7, 26), LocalDate.of(2026, 8, 25));
 
+        when(regularPayFixationRepository.findByEmployeeIdAndCurrentTrue(1L)).thenReturn(Optional.of(fixation));
         when(dailyAttendanceRepository.findByEmployeeIdAndAttendanceDateBetween(1L,
                 LocalDate.of(2026, 7, 26), LocalDate.of(2026, 8, 25)))
                 .thenReturn(List.of());
@@ -314,11 +323,13 @@ class PayrollComputationServiceTest {
 
     @Test
     void compute_forTerminatedEmployee_stillComputesButFlagsHold() {
-        Employee employee = employeeWith(payScale(ScaleType.IDA, "50000.00"), regionalOffice(CityClass.X), EmployeeStatus.TERMINATED);
-        ReflectionTestUtils.setField(employee, "id", 1L);
+        Employee employee = employeeWith(regionalOffice(CityClass.X), EmployeeStatus.TERMINATED);
+        GradeScaleMaster gradeScale = gradeScale(ScaleType.IDA, "50000.00");
+        RegularPayFixation fixation = new RegularPayFixation(employee, gradeScale, new BigDecimal("50000.00"), LocalDate.of(2020, 1, 15));
 
         PayrollRun run = new PayrollRun(2026, 8, LocalDate.of(2026, 7, 26), LocalDate.of(2026, 8, 25));
 
+        when(regularPayFixationRepository.findByEmployeeIdAndCurrentTrue(1L)).thenReturn(Optional.of(fixation));
         when(dailyAttendanceRepository.findByEmployeeIdAndAttendanceDateBetween(1L,
                 LocalDate.of(2026, 7, 26), LocalDate.of(2026, 8, 25)))
                 .thenReturn(List.of());

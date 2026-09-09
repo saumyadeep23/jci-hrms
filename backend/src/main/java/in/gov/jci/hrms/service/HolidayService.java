@@ -6,6 +6,7 @@ import in.gov.jci.hrms.dto.HolidayResponse;
 import in.gov.jci.hrms.entity.DepartmentalPurchaseCentre;
 import in.gov.jci.hrms.entity.Employee;
 import in.gov.jci.hrms.entity.Holiday;
+import in.gov.jci.hrms.entity.HolidayType;
 import in.gov.jci.hrms.entity.RegionalOffice;
 import in.gov.jci.hrms.exception.EmployeeNotFoundException;
 import in.gov.jci.hrms.exception.MasterDataConflictException;
@@ -22,6 +23,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Optional;
 
@@ -101,6 +103,40 @@ public class HolidayService {
                 upcoming.map(Holiday::getHolidayDate).orElse(null),
                 upcoming.map(Holiday::getName).orElse(null)
         );
+    }
+
+    /**
+     * Restricted holidays the caller can pick from for a whole year (e.g.
+     * the Combined CL+RH form's RH dropdown) - national/CENTRAL rows plus
+     * the caller's own state's rows only. Without this scoping, a festival
+     * published as a separate row per state (V39: multi-state) - e.g. a
+     * Ganesh Chaturthi row each for Maharashtra, Karnataka, Gujarat, ... -
+     * would surface every state's row to every employee, showing as
+     * several duplicate-looking entries for what is really one holiday per
+     * location. Deduplicated by (date, name) as a last-resort safety net in
+     * case the master data itself ever has a true accidental duplicate.
+     */
+    public List<HolidayResponse> getMyRestrictedHolidays(Long employeeId, int year) {
+        Employee employee = employeeRepository.findById(employeeId)
+                .orElseThrow(() -> new EmployeeNotFoundException(employeeId));
+        String employeeState = resolveState(employee);
+
+        LocalDate yearStart = LocalDate.of(year, 1, 1);
+        LocalDate yearEnd = LocalDate.of(year, 12, 31);
+        List<Holiday> yearHolidays = holidayRepository.findByHolidayDateBetween(yearStart, yearEnd);
+
+        LinkedHashMap<String, Holiday> deduped = new LinkedHashMap<>();
+        for (Holiday holiday : yearHolidays) {
+            if (holiday.getHolidayType() != HolidayType.RESTRICTED || !isApplicable(holiday, employeeState)) {
+                continue;
+            }
+            deduped.putIfAbsent(holiday.getHolidayDate() + "|" + holiday.getName(), holiday);
+        }
+
+        return deduped.values().stream()
+                .sorted(Comparator.comparing(Holiday::getHolidayDate))
+                .map(HolidayResponse::from)
+                .toList();
     }
 
     private List<Holiday> filterApplicable(List<Holiday> holidays, String employeeState) {

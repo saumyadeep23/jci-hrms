@@ -18,16 +18,32 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.List;
 
+/**
+ * Deprecated (Phase 1 of the pay_scale_master -> grade_scale_master
+ * cutover, V60): pay_scale_master itself is untouched and this service's
+ * read/write logic still works, but PayScaleController now only exposes
+ * its GET endpoints - see that controller's own javadoc. Kept, not
+ * deleted, since dropping the table is a separate, later Phase 2 pending
+ * confirmation nothing still needs pay_scale_master's extra
+ * per-designation/historical rows that grade_scale_master doesn't carry.
+ */
+@Deprecated
 @Service
 @Transactional(readOnly = true)
 public class PayScaleService {
 
     private static final String ENTITY_NAME = "Pay Scale";
 
-    private static final List<MasterDependencyService.DependencyProbe> DEPENDENCY_PROBES = List.of(
-            new MasterDependencyService.DependencyProbe("employees", "pay_scale_id", "Employees", true),
-            new MasterDependencyService.DependencyProbe("employee_employment_categories", "pay_scale_id", "Employment Categories", true)
-    );
+    /**
+     * Empty (V60): the two columns this used to probe - employees.pay_scale_id
+     * and employee_employment_categories.pay_scale_id - were both dropped by
+     * that migration (the latter's FK had drifted to point at
+     * grade_scale_master anyway, not pay_scale_master, before it was
+     * dropped). Nothing references pay_scale_master by FK anymore, so
+     * there's nothing left to probe - see MasterDependencyService.check(),
+     * which is a no-op over an empty probe list.
+     */
+    private static final List<MasterDependencyService.DependencyProbe> DEPENDENCY_PROBES = List.of();
 
     private final PayScaleRepository payScaleRepository;
     private final MasterDependencyService masterDependencyService;

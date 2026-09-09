@@ -8,13 +8,16 @@ import in.gov.jci.hrms.entity.DailyAttendance;
 import in.gov.jci.hrms.entity.Employee;
 import in.gov.jci.hrms.entity.EmployeeStatus;
 import in.gov.jci.hrms.entity.EmployeeSuperannuationDetails;
+import in.gov.jci.hrms.entity.GradeScaleMaster;
 import in.gov.jci.hrms.entity.PayrollRun;
+import in.gov.jci.hrms.entity.RegularPayFixation;
 import in.gov.jci.hrms.entity.RegionalOffice;
 import in.gov.jci.hrms.entity.ScaleType;
 import in.gov.jci.hrms.exception.BusinessRuleViolationException;
 import in.gov.jci.hrms.repository.DaRateHistoryRepository;
 import in.gov.jci.hrms.repository.DailyAttendanceRepository;
 import in.gov.jci.hrms.repository.EmployeeSuperannuationDetailsRepository;
+import in.gov.jci.hrms.repository.RegularPayFixationRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -42,11 +45,12 @@ import java.util.List;
  * <ul>
  *   <li>"Mid-cycle promotion/increment splitting" - there is no
  *   effective-dated history of an employee's basic pay anywhere in this
- *   schema (Employee.payScale is a live pointer, PayScale only stores a
- *   min/max band). proratedAmount() is the correct, reusable day-weighting
- *   primitive a multi-segment split would be built from, but
+ *   schema (resolveCurrentGradeScale() resolves a live current
+ *   regular_pay_fixations pointer - V60 - and GradeScaleMaster only stores
+ *   a min/max band). proratedAmount() is the correct, reusable
+ *   day-weighting primitive a multi-segment split would be built from, but
  *   computeBasicPay() can currently only ever produce a single segment
- *   against payScale.getMinimumBasic() - there's nothing to split against.
+ *   against gradeScale.getMinimumBasic() - there's nothing to split against.
  *   <li>An employee's actual current basic pay figure isn't tracked either
  *   (only the scale's min/max band is) - this service uses the scale
  *   minimum as a stand-in, which is a simplification, not a true "current
@@ -75,15 +79,18 @@ public class PayrollComputationService {
     private final DaRateHistoryRepository daRateHistoryRepository;
     private final PayrollRateProperties rateProperties;
     private final EmployeeSuperannuationDetailsRepository superannuationDetailsRepository;
+    private final RegularPayFixationRepository regularPayFixationRepository;
 
     public PayrollComputationService(DailyAttendanceRepository dailyAttendanceRepository,
                                       DaRateHistoryRepository daRateHistoryRepository,
                                       PayrollRateProperties rateProperties,
-                                      EmployeeSuperannuationDetailsRepository superannuationDetailsRepository) {
+                                      EmployeeSuperannuationDetailsRepository superannuationDetailsRepository,
+                                      RegularPayFixationRepository regularPayFixationRepository) {
         this.dailyAttendanceRepository = dailyAttendanceRepository;
         this.daRateHistoryRepository = daRateHistoryRepository;
         this.rateProperties = rateProperties;
         this.superannuationDetailsRepository = superannuationDetailsRepository;
+        this.regularPayFixationRepository = regularPayFixationRepository;
     }
 
     public record CycleDates(LocalDate startDate, LocalDate endDate) {
@@ -141,15 +148,25 @@ public class PayrollComputationService {
         return lopDays;
     }
 
-    public BigDecimal computeBasicPay(Employee employee, LocalDate cycleStart, LocalDate cycleEnd, BigDecimal lopDays) {
-        if (employee.getPayScale() == null) {
-            throw new BusinessRuleViolationException(
-                    "Employee " + employee.getId() + " has no pay scale assigned; cannot compute payroll");
-        }
-
+    /**
+     * gradeScale comes from the employee's current regular_pay_fixations
+     * row (V60: employee.getPayScale()/pay_scale_master is gone) - see
+     * resolveCurrentGradeScale(). Still just the scale's minimum as a
+     * stand-in for "current basic pay" (see class Javadoc's known
+     * limitation) - the grade_scale_master switch doesn't change that.
+     */
+    public BigDecimal computeBasicPay(GradeScaleMaster gradeScale, LocalDate cycleStart, LocalDate cycleEnd, BigDecimal lopDays) {
         BigDecimal totalCycleDays = BigDecimal.valueOf(ChronoUnit.DAYS.between(cycleStart, cycleEnd) + 1);
         BigDecimal payableDays = totalCycleDays.subtract(lopDays);
-        return proratedAmount(employee.getPayScale().getMinimumBasic(), payableDays, totalCycleDays);
+        return proratedAmount(gradeScale.getMinimumBasic(), payableDays, totalCycleDays);
+    }
+
+    /** V60: the sole source of an employee's current grade/scale is their active regular_pay_fixations row - see RegularPayFixation.getGradeScale(). */
+    public GradeScaleMaster resolveCurrentGradeScale(Employee employee) {
+        return regularPayFixationRepository.findByEmployeeIdAndCurrentTrue(employee.getId())
+                .map(RegularPayFixation::getGradeScale)
+                .orElseThrow(() -> new BusinessRuleViolationException(
+                        "Employee " + employee.getId() + " has no current pay fixation; cannot compute payroll"));
     }
 
     /**
@@ -243,9 +260,10 @@ public class PayrollComputationService {
         LocalDate cycleStart = payrollRun.getStartDate();
         LocalDate cycleEnd = payrollRun.getEndDate();
 
+        GradeScaleMaster gradeScale = resolveCurrentGradeScale(employee);
         BigDecimal lopDays = computeLopDays(employee.getId(), cycleStart, cycleEnd);
-        BigDecimal basicPay = computeBasicPay(employee, cycleStart, cycleEnd, lopDays);
-        BigDecimal daPercentage = resolveDaPercentage(employee.getPayScale().getScaleType(), cycleEnd);
+        BigDecimal basicPay = computeBasicPay(gradeScale, cycleStart, cycleEnd, lopDays);
+        BigDecimal daPercentage = resolveDaPercentage(gradeScale.getScaleType(), cycleEnd);
         BigDecimal dearnessAllowance = computeDearnessAllowance(basicPay, daPercentage);
         CityClass cityClass = resolveCityClass(employee);
         BigDecimal houseRentAllowance = computeHouseRentAllowance(basicPay, dearnessAllowance, cityClass);

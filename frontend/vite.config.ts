@@ -1,7 +1,18 @@
+import { readFileSync, existsSync } from 'node:fs'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
+
+// Shared mkcert dev cert at repo-root certs/ (gitignored, machine-specific - see
+// `mkcert -cert-file certs/dev-cert.pem -key-file certs/dev-key.pem localhost 127.0.0.1 ::1 <lan-ip>`
+// run from the repo root). Optional: only wires up HTTPS when both files exist, so `npm run dev` keeps
+// working with zero setup for anyone who hasn't generated one - HTTPS is only needed for real-device
+// testing (a phone's camera/geolocation are secure-context-only, and localhost's exception doesn't
+// cover a LAN address).
+const certFile = '../certs/dev-cert.pem'
+const keyFile = '../certs/dev-key.pem'
+const httpsConfig = existsSync(certFile) && existsSync(keyFile) ? { cert: readFileSync(certFile), key: readFileSync(keyFile) } : undefined
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -48,6 +59,11 @@ export default defineConfig({
   ],
   server: {
     port: 5173,
+    // 0.0.0.0 (not just localhost) so the dev server is reachable from another device on the LAN, e.g.
+    // a phone testing the mobile punch flow - see api/client.ts for how the frontend then finds the
+    // backend from whatever host it was itself loaded from.
+    host: true,
+    https: httpsConfig,
     // No /api dev-server proxy: src/api/client.ts already calls the backend
     // directly at an absolute http://localhost:8080/api baseURL (with
     // withCredentials: true), and the backend's SecurityConfig now serves a

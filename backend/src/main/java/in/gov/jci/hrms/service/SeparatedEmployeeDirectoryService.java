@@ -66,7 +66,14 @@ public class SeparatedEmployeeDirectoryService implements PimsReportExportSource
     }
 
     public Page<SeparatedEmployeeResponse> list(String status, String search, Pageable pageable) {
-        String statusFilter = status != null && !status.isBlank() ? status.toUpperCase() : null;
+        // "ALL"/"SEPARATED" are meta-keywords (matching EmployeeSpecification.filterEmployees'
+        // convention on the sibling /api/employees endpoint) meaning "no additional narrowing" -
+        // the WHERE clause below already restricts to the 4 terminal statuses unconditionally, so
+        // both collapse to the same no-op filter as a blank/absent status. A real value (e.g.
+        // "RETIRED") still narrows to exactly that one status.
+        String normalizedStatus = status != null && !status.isBlank() ? status.toUpperCase() : null;
+        String statusFilter = normalizedStatus == null || normalizedStatus.equals("ALL") || normalizedStatus.equals("SEPARATED")
+                ? null : normalizedStatus;
         String searchPattern = search != null && !search.isBlank() ? "%" + search.trim().toLowerCase() + "%" : null;
 
         Long total = jdbcTemplate.queryForObject(COUNT_SQL, Long.class,

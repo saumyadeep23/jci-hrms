@@ -83,7 +83,7 @@ class EmployeeControllerTest {
     private EmployeeRequest validRequest() {
         return new EmployeeRequest(
                 Salutation.MS, "Asha", null, "Rao", Gender.FEMALE, LocalDate.of(1990, 5, 1), MaritalStatus.SINGLE, null,
-                "Indian", null, "ABCDE1234F", "CPF00001", "123456789012", "asha.rao@example.com", null, "9876543210", null,
+                "Indian", null, "ABCDE1234F", "CPF00001", null, "123456789012", "asha.rao@example.com", null, "9876543210", null,
                 LocalDate.of(2024, 1, 15), DEPARTMENT_ID, DESIGNATION_ID, RO_ID, DPC_ID, PAY_SCALE_ID,
                 EmployeeStatus.ACTIVE, false, null, null, null, null, null
         );
@@ -92,7 +92,7 @@ class EmployeeControllerTest {
     private EmployeeResponse responseFor(Long id, EmployeeRequest request) {
         Instant now = Instant.now();
         return new EmployeeResponse(
-                id, "0001", "EMP000001", request.salutation(), request.firstName(), request.middleName(), request.lastName(),
+                id, "0001", "EMP000001", null, request.salutation(), request.firstName(), request.middleName(), request.lastName(),
                 request.firstName() + " " + request.lastName(), request.gender(), request.dateOfBirth(), request.maritalStatus(),
                 request.bloodGroup(), request.nationality(), request.motherTongue(), request.panNumber(), "XXXX-XXXX-9012",
                 request.personalEmail(), request.officialEmail(), request.phone(), request.officialMobile(),
@@ -125,7 +125,7 @@ class EmployeeControllerTest {
     @Test
     void create_withMissingRequiredFields_returns400WithFieldErrors() throws Exception {
         EmployeeRequest invalid = new EmployeeRequest(
-                null, "", null, "Rao", null, null, null, null, "", null, "not-a-pan", null, null, "not-an-email", null, "123", null,
+                null, "", null, "Rao", null, null, null, null, "", null, "not-a-pan", null, null, null, "not-an-email", null, "123", null,
                 null, null, null, null, null, null, null, false, null, null, null, null, null
         );
 
@@ -199,7 +199,7 @@ class EmployeeControllerTest {
     @Test
     void update_withMissingRequiredFields_returns400() throws Exception {
         EmployeeRequest invalid = new EmployeeRequest(
-                null, "Asha", null, "Rao", null, null, null, null, "", null, "not-a-pan", null, null, "asha.rao@example.com",
+                null, "Asha", null, "Rao", null, null, null, null, "", null, "not-a-pan", null, null, null, "asha.rao@example.com",
                 null, "123", null, null, null, null, null, null, null, null, false, null, null, null, null, null
         );
 

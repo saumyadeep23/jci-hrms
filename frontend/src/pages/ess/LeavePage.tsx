@@ -6,6 +6,7 @@ import { formatDate } from '../../lib/date'
 import { LeaveApplicationForm } from '../../components/leave/LeaveApplicationForm'
 import { CombinedLeaveApplicationForm } from '../../components/leave/CombinedLeaveApplicationForm'
 import { LeaveBalanceSplitCard } from '../../components/leave/LeaveBalanceSplitCard'
+import { LeaveRoutingModal } from '../../components/leave/LeaveRoutingModal'
 import { Badge, Card, ErrorState, LoadingState, PageHeader, SecondaryButton } from '../../components/common/ui'
 import type { EmployeeResponse, LeaveApplicationResponse } from '../../types/api'
 
@@ -36,6 +37,7 @@ export function LeavePage() {
   const { employeeId } = useAuth()
   const queryClient = useQueryClient()
   const [applicationMode, setApplicationMode] = useState<ApplicationMode>('standard')
+  const [routingModalId, setRoutingModalId] = useState<number | null>(null)
 
   const profile = useQuery({
     queryKey: ['employee', employeeId],
@@ -190,16 +192,21 @@ export function LeavePage() {
                   <Badge tone={STATUS_TONE[lookup.data.status] ?? 'neutral'}>{lookup.data.status.replace(/_/g, ' ')}</Badge>
                 </div>
                 <p className="text-sm text-slate-500">{lookup.data.reason}</p>
-                {lookup.data.status === 'PENDING_APPROVAL' && (
-                  <SecondaryButton onClick={() => cancelMutation.mutate(lookup.data!.id)} disabled={cancelMutation.isPending}>
-                    Cancel
-                  </SecondaryButton>
-                )}
+                <div className="flex gap-2">
+                  <SecondaryButton onClick={() => setRoutingModalId(lookup.data!.id)}>View Routing</SecondaryButton>
+                  {lookup.data.status === 'PENDING_APPROVAL' && (
+                    <SecondaryButton onClick={() => cancelMutation.mutate(lookup.data!.id)} disabled={cancelMutation.isPending}>
+                      Cancel
+                    </SecondaryButton>
+                  )}
+                </div>
               </div>
             </Card>
           )}
         </div>
       </div>
+
+      {routingModalId !== null && <LeaveRoutingModal applicationId={routingModalId} onClose={() => setRoutingModalId(null)} />}
     </div>
   )
 }

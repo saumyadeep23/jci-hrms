@@ -4,6 +4,7 @@ import in.gov.jci.hrms.entity.Employee;
 import in.gov.jci.hrms.entity.LeaveApplication;
 import in.gov.jci.hrms.entity.LeaveApplicationStatus;
 import in.gov.jci.hrms.entity.LeaveSession;
+import in.gov.jci.hrms.entity.LeaveWorkflowStage;
 import in.gov.jci.hrms.entity.PostMaster;
 
 import java.math.BigDecimal;
@@ -27,6 +28,10 @@ public record LeaveApplicationResponse(
         String approverPostTitle,
         Long approverEmployeeId,
         String approverEmployeeCode,
+        LeaveWorkflowStage workflowStage,
+        Long currentAssignedToEmployeeId,
+        String currentAssignedToName,
+        String currentAssignedToDesignation,
         UUID groupApplicationId,
         Long rhEntryId,
         BigDecimal debitedEnjoyableDays,
@@ -37,6 +42,7 @@ public record LeaveApplicationResponse(
     public static LeaveApplicationResponse from(LeaveApplication application) {
         PostMaster approverPost = application.getApproverPost();
         Employee approverEmployee = application.getApproverEmployee();
+        Employee currentAssignedTo = application.getCurrentAssignedTo();
 
         return new LeaveApplicationResponse(
                 application.getId(),
@@ -54,6 +60,10 @@ public record LeaveApplicationResponse(
                 approverPost != null ? approverPost.getTitle() : null,
                 approverEmployee != null ? approverEmployee.getId() : null,
                 approverEmployee != null ? approverEmployee.getEmployeeCode() : null,
+                application.getWorkflowStage(),
+                currentAssignedTo != null ? currentAssignedTo.getId() : null,
+                currentAssignedTo != null ? currentAssignedTo.getFullName() : null,
+                currentAssignedTo != null && currentAssignedTo.getDesignation() != null ? currentAssignedTo.getDesignation().getTitle() : null,
                 application.getGroupApplicationId(),
                 application.getRhEntry() != null ? application.getRhEntry().getId() : null,
                 application.getDebitedEnjoyableDays(),

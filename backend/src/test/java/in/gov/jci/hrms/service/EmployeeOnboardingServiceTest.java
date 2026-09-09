@@ -27,9 +27,11 @@ import in.gov.jci.hrms.entity.EmployeeEmploymentCategory;
 import in.gov.jci.hrms.entity.EmployeeOnboardingDraft;
 import in.gov.jci.hrms.entity.EmployeeStatus;
 import in.gov.jci.hrms.entity.EmploymentCategory;
+import in.gov.jci.hrms.entity.FamilyRelationshipType;
 import in.gov.jci.hrms.entity.Gender;
 import in.gov.jci.hrms.entity.GradeScaleMaster;
 import in.gov.jci.hrms.entity.MaritalStatus;
+import in.gov.jci.hrms.entity.NominationType;
 import in.gov.jci.hrms.entity.OnboardingStatus;
 import in.gov.jci.hrms.entity.PastServiceOrganizationType;
 import in.gov.jci.hrms.entity.PostMaster;
@@ -58,7 +60,6 @@ import in.gov.jci.hrms.repository.EmployeeSocialProfileRepository;
 import in.gov.jci.hrms.repository.GradeScaleMasterRepository;
 import in.gov.jci.hrms.repository.OutsourcedDeploymentRepository;
 import in.gov.jci.hrms.repository.OutsourcedSalaryBreakdownItemRepository;
-import in.gov.jci.hrms.repository.PayScaleRepository;
 import in.gov.jci.hrms.repository.PostMasterRepository;
 import in.gov.jci.hrms.repository.RegularPayFixationRepository;
 import in.gov.jci.hrms.repository.VendorMasterRepository;
@@ -117,7 +118,6 @@ class EmployeeOnboardingServiceTest {
     @Mock private DepartmentRepository departmentRepository;
     @Mock private DesignationRepository designationRepository;
     @Mock private VendorMasterRepository vendorMasterRepository;
-    @Mock private PayScaleRepository payScaleRepository;
     @Mock private GradeScaleMasterRepository gradeScaleMasterRepository;
     @Mock private RegularPayFixationRepository regularPayFixationRepository;
     @Mock private ContractualEngagementRepository contractualEngagementRepository;
@@ -137,7 +137,7 @@ class EmployeeOnboardingServiceTest {
                 nomineeRepository, dependentRepository, addressRepository, bankAccountRepository,
                 employmentCategoryRepository, salaryBreakdownRepository, familyDetailsRepository,
                 recruitmentDetailsRepository, documentRepository, socialProfileRepository, postMasterRepository,
-                departmentRepository, designationRepository, vendorMasterRepository, payScaleRepository,
+                departmentRepository, designationRepository, vendorMasterRepository,
                 gradeScaleMasterRepository, regularPayFixationRepository, contractualEngagementRepository,
                 outsourcedDeploymentRepository, employeeCodeGeneratorService, employeeService, postIncumbencyService,
                 validator, objectMapper);
@@ -156,7 +156,7 @@ class EmployeeOnboardingServiceTest {
     private OnboardingPersonalDetailsRequest personal() {
         return new OnboardingPersonalDetailsRequest(
                 Salutation.MS, "Asha", null, "Rao", Gender.FEMALE, LocalDate.of(1990, 5, 1), MaritalStatus.SINGLE, null,
-                "Indian", null, "ABCDE1234F", "CPF00001", "123456789012", "asha.rao@example.com", null, "9876543210", null);
+                "Indian", null, "ABCDE1234F", "CPF00001", null, "123456789012", "asha.rao@example.com", null, "9876543210", null);
     }
 
     private EmployeeAddressRequest address() {
@@ -184,8 +184,8 @@ class EmployeeOnboardingServiceTest {
 
     private OnboardingFamilyStepRequest family() {
         return new OnboardingFamilyStepRequest("Ram Rao", "Sita Rao", null, null,
-                List.of(new OnboardingDependentEntry("Sita Rao", "Mother", LocalDate.of(1965, 1, 1), true, true)),
-                List.of(new OnboardingNomineeEntry("Sita Rao", "Mother", new BigDecimal("100.00"), "PF")));
+                List.of(new OnboardingDependentEntry("Sita Rao", FamilyRelationshipType.MOTHER, LocalDate.of(1965, 1, 1), true, true)),
+                List.of(new OnboardingNomineeEntry("Sita Rao", FamilyRelationshipType.MOTHER, new BigDecimal("100.00"), NominationType.PF)));
     }
 
     private List<OnboardingDocumentEntry> documents() {
@@ -282,7 +282,7 @@ class EmployeeOnboardingServiceTest {
         EmployeeOnboardingDraft draft = newDraft();
         stubFindDraft(draft);
         OnboardingFamilyStepRequest badFamily = new OnboardingFamilyStepRequest("Ram Rao", null, null, null, List.of(),
-                List.of(new OnboardingNomineeEntry("Sita Rao", "Mother", new BigDecimal("60.00"), "PF")));
+                List.of(new OnboardingNomineeEntry("Sita Rao", FamilyRelationshipType.MOTHER, new BigDecimal("60.00"), NominationType.PF)));
         onboardingService.upsert(new OnboardingDraftUpsertRequest(
                 DRAFT_ID, null, personal(), address(), null, true, banking(), List.of(), List.of(), employmentRegular(), badFamily, documents(), null), null);
 
@@ -306,19 +306,14 @@ class EmployeeOnboardingServiceTest {
         post.setVacancyStatus(VacancyStatus.VACANT);
         post.setBudgeted(true);
         when(postMasterRepository.findById(POST_ID)).thenReturn(Optional.of(post));
-        in.gov.jci.hrms.entity.PayScale payScale = new in.gov.jci.hrms.entity.PayScale(
-                in.gov.jci.hrms.entity.ScaleType.IDA, "E1", new BigDecimal("40000.00"), new BigDecimal("60000.00"),
-                new BigDecimal("3.00"), true);
-        ReflectionTestUtils.setField(payScale, "id", PAY_SCALE_ID);
-        when(payScaleRepository.findById(PAY_SCALE_ID)).thenReturn(Optional.of(payScale));
         when(gradeScaleMasterRepository.findByScaleCode("E1")).thenReturn(Optional.of(gradeScale()));
 
         EmployeeResponse createdEmployee = new EmployeeResponse(
-                100L, "0001", "EMP000001", Salutation.MS, "Asha", null, "Rao", "Asha Rao", Gender.FEMALE,
+                100L, "0001", "EMP000001", null, Salutation.MS, "Asha", null, "Rao", "Asha Rao", Gender.FEMALE,
                 LocalDate.of(1990, 5, 1), MaritalStatus.SINGLE, null, "Indian", null, "ABCDE1234F", "XXXX-XXXX-9012",
                 "asha.rao@example.com", null, "9876543210", null, LocalDate.of(2026, 1, 15),
                 DEPARTMENT_ID, "Engineering", DESIGNATION_ID, "Backend Developer", null, null, null, null,
-                PAY_SCALE_ID, "E1", EmployeeStatus.ACTIVE, false, null, Instant.now(), Instant.now(), null, null, null, null, null, false, false, false, null);
+                null, "E1", EmployeeStatus.ACTIVE, false, null, Instant.now(), Instant.now(), null, null, null, null, null, false, false, false, null);
         when(employeeService.create(any(EmployeeRequest.class), eq("0001"))).thenReturn(createdEmployee);
 
         Employee employee = new Employee("0001", Salutation.MS, "Asha", "Rao", Gender.FEMALE, LocalDate.of(1990, 5, 1),
@@ -372,7 +367,7 @@ class EmployeeOnboardingServiceTest {
         when(gradeScaleMasterRepository.findByScaleCode("E1")).thenReturn(Optional.of(gradeScale()));
 
         EmployeeResponse createdEmployee = new EmployeeResponse(
-                100L, "0001", "EMP000001", Salutation.MS, "Asha", null, "Rao", "Asha Rao", Gender.FEMALE,
+                100L, "0001", "EMP000001", null, Salutation.MS, "Asha", null, "Rao", "Asha Rao", Gender.FEMALE,
                 LocalDate.of(1990, 5, 1), MaritalStatus.SINGLE, null, "Indian", null, "ABCDE1234F", "XXXX-XXXX-9012",
                 "asha.rao@example.com", null, "9876543210", null, LocalDate.of(2026, 1, 15),
                 DEPARTMENT_ID, "Engineering", DESIGNATION_ID, "Backend Developer", null, null, null, null,
@@ -390,10 +385,8 @@ class EmployeeOnboardingServiceTest {
         assertThat(response.employeeId()).isEqualTo(100L);
         ArgumentCaptor<EmployeeEmploymentCategory> captor = ArgumentCaptor.forClass(EmployeeEmploymentCategory.class);
         verify(employmentCategoryRepository).save(captor.capture());
-        assertThat(captor.getValue().getPayScale()).isNull();
         assertThat(captor.getValue().getGradeScale().getScaleCode()).isEqualTo("E1");
         assertThat(captor.getValue().getRegularBasicPay()).isEqualByComparingTo("45000.00");
-        verifyNoInteractions(payScaleRepository);
     }
 
     @Test

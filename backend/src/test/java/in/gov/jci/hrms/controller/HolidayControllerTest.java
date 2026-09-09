@@ -141,4 +141,24 @@ class HolidayControllerTest {
         mockMvc.perform(get("/api/holidays/my-calendar").param("year", "2026").param("month", "1"))
                 .andExpect(status().isUnauthorized());
     }
+
+    @Test
+    void getMyRestrictedHolidays_resolvesEmployeeFromJwtClaim_returns200() throws Exception {
+        HolidayResponse rh = new HolidayResponse(2L, LocalDate.of(2026, 9, 14), "Ganesh Chaturthi",
+                HolidayType.RESTRICTED, "West Bengal", Instant.now(), Instant.now());
+        when(holidayService.getMyRestrictedHolidays(eq(7L), eq(2026))).thenReturn(List.of(rh));
+
+        mockMvc.perform(get("/api/holidays/my-restricted").param("year", "2026")
+                        .with(jwt().jwt(builder -> builder.claim("employee_id", "7"))
+                                .authorities(new SimpleGrantedAuthority("ROLE_EMPLOYEE"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].name").value("Ganesh Chaturthi"));
+    }
+
+    @Test
+    @WithAnonymousUser
+    void getMyRestrictedHolidays_withoutAuthentication_returns401() throws Exception {
+        mockMvc.perform(get("/api/holidays/my-restricted").param("year", "2026"))
+                .andExpect(status().isUnauthorized());
+    }
 }

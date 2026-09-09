@@ -46,10 +46,10 @@ import in.gov.jci.hrms.entity.EmploymentCategory;
 import in.gov.jci.hrms.entity.FixationReason;
 import in.gov.jci.hrms.entity.GradeScaleMaster;
 import in.gov.jci.hrms.entity.IncrementCycle;
+import in.gov.jci.hrms.entity.NominationType;
 import in.gov.jci.hrms.entity.OnboardingStatus;
 import in.gov.jci.hrms.entity.OutsourcedDeployment;
 import in.gov.jci.hrms.entity.OutsourcedSalaryBreakdownItem;
-import in.gov.jci.hrms.entity.PayScale;
 import in.gov.jci.hrms.entity.PostMaster;
 import in.gov.jci.hrms.entity.RegularPayFixation;
 import in.gov.jci.hrms.entity.VacancyStatus;
@@ -76,7 +76,6 @@ import in.gov.jci.hrms.repository.EmployeeSocialProfileRepository;
 import in.gov.jci.hrms.repository.GradeScaleMasterRepository;
 import in.gov.jci.hrms.repository.OutsourcedDeploymentRepository;
 import in.gov.jci.hrms.repository.OutsourcedSalaryBreakdownItemRepository;
-import in.gov.jci.hrms.repository.PayScaleRepository;
 import in.gov.jci.hrms.repository.PostMasterRepository;
 import in.gov.jci.hrms.repository.RegularPayFixationRepository;
 import in.gov.jci.hrms.repository.VendorMasterRepository;
@@ -136,7 +135,6 @@ public class EmployeeOnboardingService {
     private final DepartmentRepository departmentRepository;
     private final DesignationRepository designationRepository;
     private final VendorMasterRepository vendorMasterRepository;
-    private final PayScaleRepository payScaleRepository;
     private final GradeScaleMasterRepository gradeScaleMasterRepository;
     private final RegularPayFixationRepository regularPayFixationRepository;
     private final ContractualEngagementRepository contractualEngagementRepository;
@@ -165,7 +163,6 @@ public class EmployeeOnboardingService {
                                       DepartmentRepository departmentRepository,
                                       DesignationRepository designationRepository,
                                       VendorMasterRepository vendorMasterRepository,
-                                      PayScaleRepository payScaleRepository,
                                       GradeScaleMasterRepository gradeScaleMasterRepository,
                                       RegularPayFixationRepository regularPayFixationRepository,
                                       ContractualEngagementRepository contractualEngagementRepository,
@@ -193,7 +190,6 @@ public class EmployeeOnboardingService {
         this.departmentRepository = departmentRepository;
         this.designationRepository = designationRepository;
         this.vendorMasterRepository = vendorMasterRepository;
-        this.payScaleRepository = payScaleRepository;
         this.gradeScaleMasterRepository = gradeScaleMasterRepository;
         this.regularPayFixationRepository = regularPayFixationRepository;
         this.contractualEngagementRepository = contractualEngagementRepository;
@@ -321,7 +317,7 @@ public class EmployeeOnboardingService {
         EmployeeRequest employeeRequest = new EmployeeRequest(
                 personal.salutation(), personal.firstName(), personal.middleName(), personal.lastName(),
                 personal.gender(), personal.dateOfBirth(), personal.maritalStatus(), personal.bloodGroup(),
-                personal.nationality(), personal.motherTongue(), personal.panNumber(), personal.cpfAcNo(), personal.aadhaarNumber(),
+                personal.nationality(), personal.motherTongue(), personal.panNumber(), personal.cpfAcNo(), personal.uanNo(), personal.aadhaarNumber(),
                 personal.personalEmail(), personal.officialEmail(), personal.phone(), personal.officialMobile(),
                 employment.dateOfJoiningPsu(), department.getId(), designation.getId(),
                 null, null, employment.employmentCategory() == EmploymentCategory.REGULAR ? employment.payScaleId() : null,
@@ -431,13 +427,10 @@ public class EmployeeOnboardingService {
         EmployeeEmploymentCategory category = new EmployeeEmploymentCategory(employee, employment.employmentCategory());
         switch (employment.employmentCategory()) {
             case REGULAR -> {
-                // payScaleId (legacy pay_scale_master) is no longer collected by the onboarding
-                // wizard - REGULAR now carries pay/grade purely via scaleCode below. Kept optional
-                // here rather than removed outright so any caller that still supplies it (or a
-                // resumed pre-existing draft) is not rejected.
-                if (employment.payScaleId() != null) {
-                    category.setPayScale(resolvePayScale(employment.payScaleId()));
-                }
+                // employment.payScaleId() (legacy pay_scale_master) is deliberately never read here -
+                // the onboarding wizard hasn't collected it since before V60, which dropped
+                // EmployeeEmploymentCategory.payScale/pay_scale_id entirely. REGULAR carries pay/grade
+                // purely via scaleCode below now.
                 category.setRegularBasicPay(employment.regularBasicPay());
             }
             case CASUAL -> {
@@ -482,7 +475,7 @@ public class EmployeeOnboardingService {
             case REGULAR -> {
                 RegularPayFixation fixation = new RegularPayFixation(
                         employee, resolveGradeScale(employment.scaleCode()), employment.regularBasicPay(), employment.dateOfJoiningPsu());
-                fixation.setFixationReason(FixationReason.INITIAL_APPOINTMENT);
+                fixation.setFixationReason(FixationReason.INITIAL_FIXATION);
                 fixation.setIncrementCycle(employment.incrementCycle() != null ? employment.incrementCycle() : IncrementCycle.JULY);
                 fixation.setOrderRefNo(employment.appointmentLetterNo());
                 regularPayFixationRepository.save(fixation);
@@ -560,11 +553,6 @@ public class EmployeeOnboardingService {
         documentRepository.save(document);
     }
 
-    private PayScale resolvePayScale(Long payScaleId) {
-        return payScaleRepository.findById(payScaleId)
-                .orElseThrow(() -> new MasterDataNotFoundException("Pay Scale", payScaleId));
-    }
-
     private GradeScaleMaster resolveGradeScale(String scaleCode) {
         return gradeScaleMasterRepository.findByScaleCode(scaleCode)
                 .orElseThrow(() -> new MasterDataNotFoundException("Grade Scale", scaleCode));
@@ -635,7 +623,7 @@ public class EmployeeOnboardingService {
         if (family == null || family.nominees() == null || family.nominees().isEmpty()) {
             return;
         }
-        Map<String, BigDecimal> totals = new HashMap<>();
+        Map<NominationType, BigDecimal> totals = new HashMap<>();
         for (OnboardingNomineeEntry nominee : family.nominees()) {
             if (nominee.sharePercentage() != null) {
                 totals.merge(nominee.nomineeFor(), nominee.sharePercentage(), BigDecimal::add);

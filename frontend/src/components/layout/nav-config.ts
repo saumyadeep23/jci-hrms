@@ -1,6 +1,7 @@
 import type { LucideIcon } from 'lucide-react'
 import {
   BarChart3,
+  Banknote,
   Building2,
   CalendarCheck,
   CalendarClock,
@@ -8,9 +9,13 @@ import {
   CircleDollarSign,
   ClipboardCheck,
   Coins,
+  FileSignature,
   FileText,
   Gavel,
+  GraduationCap,
+  HandCoins,
   History,
+  Landmark,
   LayoutDashboard,
   LayoutGrid,
   MoveRight,
@@ -66,6 +71,10 @@ const HR_ADMIN: Role[] = ['HR_ADMIN', 'SUPER_ADMIN']
 const FINANCE_ADMIN: Role[] = ['FINANCE_ADMIN', 'SUPER_ADMIN']
 const ALMS_REPORT_ROLES: Role[] = ['HR_ADMIN', 'FINANCE_ADMIN', 'SUPER_ADMIN']
 const SUPER_ADMIN: Role[] = ['SUPER_ADMIN']
+/** Matches PayrollMasterController's own @PreAuthorize exactly - no SUPER_ADMIN bypass there, so none here either. */
+const PAYROLL_MASTER_ROLES: Role[] = ['HR_ADMIN', 'BILL_SUPERVISOR', 'FINANCE_ADMIN']
+/** Matches CpfTrustController/CpfLoanController's own @PreAuthorize exactly. */
+const CPF_TRUST_ROLES: Role[] = ['FINANCE_ADMIN', 'CPF_ADMIN', 'SUPER_ADMIN']
 
 /**
  * The full sidebar, top to bottom: flat ESS self-service items first
@@ -99,6 +108,7 @@ export const NAV_ENTRIES: NavEntry[] = [
   { to: '/apar', label: 'APAR Evaluation', icon: ClipboardCheck, roles: ALL_STAFF, essDefault: true },
   { to: '/loans', label: 'Loans & Advances', icon: FileText, roles: ALL_STAFF, essDefault: true },
   { to: '/self-service/leave/encashment', label: 'EL Encashment', icon: CircleDollarSign, roles: ALL_STAFF, essDefault: true },
+  { to: '/self-service/cea-claims', label: 'CEA / Hostel Subsidy', icon: GraduationCap, roles: ALL_STAFF, essDefault: true },
 
   { to: '/profile', label: 'Profile', icon: User, roles: ALL_STAFF, primary: true, essDefault: true },
   { to: '/pf-statement', label: 'PF Statement', icon: Coins, roles: ALL_STAFF },
@@ -153,8 +163,34 @@ export const NAV_ENTRIES: NavEntry[] = [
   { to: '/migration', label: 'Legacy Migration Workbench', icon: UploadCloud, roles: HR_ADMIN },
   { to: '/disciplinary', label: 'Disciplinary Cases', icon: Gavel, roles: HR_ADMIN },
 
-  { to: '/da-rates', label: 'DA Rate History', icon: TrendingUp, roles: FINANCE_ADMIN },
   { to: '/payroll', label: 'Payroll & Remittance Processing', icon: ScrollText, roles: FINANCE_ADMIN },
+  {
+    label: 'Payroll Masters',
+    icon: Banknote,
+    roles: PAYROLL_MASTER_ROLES,
+    to: '/admin/payroll/masters',
+    children: [
+      { to: '/admin/payroll/masters', label: 'Master Console', icon: Banknote, roles: PAYROLL_MASTER_ROLES },
+      // Same role set as the pre-existing flat /da-rates link this replaces - DaRateHistoryController's
+      // own @PreAuthorize doesn't grant BILL_SUPERVISOR, so this stays FINANCE_ADMIN-only rather than
+      // the wider PAYROLL_MASTER_ROLES used by its Payroll Masters siblings.
+      { to: '/admin/payroll/masters/da-rates', label: 'DA Rate Manager', icon: TrendingUp, roles: FINANCE_ADMIN },
+      { to: '/hr/nps-declarations', label: 'NPS Declaration Desk', icon: FileSignature, roles: PAYROLL_MASTER_ROLES },
+      { to: '/admin/payroll/nps-declarations', label: 'NPS Compliance Dashboard', icon: ClipboardCheck, roles: PAYROLL_MASTER_ROLES },
+    ],
+  },
+  {
+    label: 'CPF Trust',
+    icon: Landmark,
+    roles: CPF_TRUST_ROLES,
+    children: [
+      { to: '/payroll/trust/members', label: "Members' List", icon: Landmark, roles: CPF_TRUST_ROLES },
+      { to: '/payroll/trust/passbook', label: 'CPF Passbook', icon: Landmark, roles: CPF_TRUST_ROLES },
+      { to: '/payroll/trust/interest-rates', label: 'CPF Rate of Interest Entry', icon: Landmark, roles: CPF_TRUST_ROLES },
+      { to: '/payroll/trust/incoming-transfers', label: 'Incoming Fund Transfers', icon: Landmark, roles: CPF_TRUST_ROLES },
+      { to: '/payroll/trust/loans', label: 'CPF Loans & Advances', icon: HandCoins, roles: CPF_TRUST_ROLES },
+    ],
+  },
 
   { to: '/audit-logs', label: 'Audit Trail Logs', icon: ShieldCheck, roles: SUPER_ADMIN },
 ]

@@ -23,7 +23,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * department_id/designation_id/regional_office_id/pay_scale_id are nullable -
+ * department_id/designation_id/regional_office_id/grade_scale_id are nullable -
  * legacy service-book backfill resolves from/to labels against master data on
  * a best-effort basis and leaves the FK null when unresolvable (see
  * LegacyMigrationService). event_type is a plain VARCHAR, not an enum, since
@@ -69,11 +69,21 @@ public class EmployeeServiceBook implements Auditable {
     private RegionalOffice regionalOffice;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "pay_scale_id")
-    private PayScale payScale;
+    @JoinColumn(name = "grade_scale_id")
+    private GradeScaleMaster gradeScale;
 
     @Column(name = "basic_pay", precision = 12, scale = 2)
     private BigDecimal basicPay;
+
+    /** EL encashment structured metadata (V64) - orderNumber/orderDate double as the sanction ref/date for these entries. */
+    @Column(name = "days_encashed", precision = 5, scale = 2)
+    private BigDecimal daysEncashed;
+
+    @Column(name = "da_rate", precision = 6, scale = 2)
+    private BigDecimal daRate;
+
+    @Column(name = "gross_amount", precision = 12, scale = 2)
+    private BigDecimal grossAmount;
 
     @Column(name = "event_description")
     private String eventDescription;
@@ -83,6 +93,11 @@ public class EmployeeServiceBook implements Auditable {
 
     @Column(name = "is_migrated", nullable = false)
     private boolean migrated = true;
+
+    /** Set only for a PRIOR_SERVICE_CREDIT event created by IncomingFundTransferService.verifyAndCreditTrustLedger(). */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "incoming_transfer_id")
+    private EmployeeIncomingFundTransfer incomingTransfer;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
@@ -160,12 +175,12 @@ public class EmployeeServiceBook implements Auditable {
         this.regionalOffice = regionalOffice;
     }
 
-    public PayScale getPayScale() {
-        return payScale;
+    public GradeScaleMaster getGradeScale() {
+        return gradeScale;
     }
 
-    public void setPayScale(PayScale payScale) {
-        this.payScale = payScale;
+    public void setGradeScale(GradeScaleMaster gradeScale) {
+        this.gradeScale = gradeScale;
     }
 
     public BigDecimal getBasicPay() {
@@ -174,6 +189,30 @@ public class EmployeeServiceBook implements Auditable {
 
     public void setBasicPay(BigDecimal basicPay) {
         this.basicPay = basicPay;
+    }
+
+    public BigDecimal getDaysEncashed() {
+        return daysEncashed;
+    }
+
+    public void setDaysEncashed(BigDecimal daysEncashed) {
+        this.daysEncashed = daysEncashed;
+    }
+
+    public BigDecimal getDaRate() {
+        return daRate;
+    }
+
+    public void setDaRate(BigDecimal daRate) {
+        this.daRate = daRate;
+    }
+
+    public BigDecimal getGrossAmount() {
+        return grossAmount;
+    }
+
+    public void setGrossAmount(BigDecimal grossAmount) {
+        this.grossAmount = grossAmount;
     }
 
     public String getEventDescription() {
@@ -198,6 +237,14 @@ public class EmployeeServiceBook implements Auditable {
 
     public void setMigrated(boolean migrated) {
         this.migrated = migrated;
+    }
+
+    public EmployeeIncomingFundTransfer getIncomingTransfer() {
+        return incomingTransfer;
+    }
+
+    public void setIncomingTransfer(EmployeeIncomingFundTransfer incomingTransfer) {
+        this.incomingTransfer = incomingTransfer;
     }
 
     public Instant getCreatedAt() {
@@ -237,7 +284,11 @@ public class EmployeeServiceBook implements Auditable {
         snapshot.put("designationId", designation != null ? designation.getId() : null);
         snapshot.put("regionalOfficeId", regionalOffice != null ? regionalOffice.getId() : null);
         snapshot.put("basicPay", basicPay);
+        snapshot.put("daysEncashed", daysEncashed);
+        snapshot.put("daRate", daRate);
+        snapshot.put("grossAmount", grossAmount);
         snapshot.put("isMigrated", migrated);
+        snapshot.put("incomingTransferId", incomingTransfer != null ? incomingTransfer.getId() : null);
         snapshot.put("deletedAt", deletedAt);
         return snapshot;
     }

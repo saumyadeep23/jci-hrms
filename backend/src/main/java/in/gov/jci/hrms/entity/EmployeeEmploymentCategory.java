@@ -49,11 +49,7 @@ public class EmployeeEmploymentCategory implements Auditable {
     @Column(name = "employment_category", nullable = false, length = 30)
     private EmploymentCategory employmentCategory;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "pay_scale_id")
-    private PayScale payScale;
-
-    /** Additive link into the new grade_scale_master (V48/V49) - see that migration's header for why this is separate from payScale/pay_scale_master. */
+    /** The sole grade/scale link since V60 dropped pay_scale_id - see that migration's header for why the old dual pay_scale_id/scale_code linkage existed and why pay_scale_id was safe to drop (its FK had drifted to point at grade_scale_master anyway, and every populated row already agreed with scale_code). */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "scale_code", referencedColumnName = "scale_code")
     private GradeScaleMaster gradeScale;
@@ -131,14 +127,6 @@ public class EmployeeEmploymentCategory implements Auditable {
 
     public void setEmploymentCategory(EmploymentCategory employmentCategory) {
         this.employmentCategory = employmentCategory;
-    }
-
-    public PayScale getPayScale() {
-        return payScale;
-    }
-
-    public void setPayScale(PayScale payScale) {
-        this.payScale = payScale;
     }
 
     public GradeScaleMaster getGradeScale() {

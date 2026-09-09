@@ -35,4 +35,5 @@ public final class SecurityUtils {
     public static String currentUsername(Authentication authentication) {
         return authentication != null ? authentication.getName() : null;
     }
+
 }

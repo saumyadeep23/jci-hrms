@@ -8,16 +8,21 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
 /**
  * Matches the shared dev database's already-live schema exactly: a UUID
- * primary key (gen_random_uuid()) and no soft-delete columns - only
- * is_active + created_at, unlike most master entities in this codebase.
- * "Delete" therefore means deactivating (is_active = false), not a
- * deleted_at-based soft delete.
+ * primary key (gen_random_uuid()) and "delete" means deactivating
+ * (is_active = false), not a deleted_at-based soft delete - StateMasterService
+ * never sets deleted_at, though V67 added the column (unused here) since it
+ * was already live. is_remote_area/remote_allowance_percentage back the
+ * Remote Area Allowance toggle on the State Master screen - see V67's own
+ * chk_state_remote_allowance_rule for the DB-level version of the rule
+ * StateMasterService also validates (false => 0.00; true => (0.00, 100.00]).
  */
 @Entity
 @Table(name = "state_master")
@@ -40,9 +45,19 @@ public class StateMaster {
     @Column(name = "is_active", nullable = false)
     private boolean active = true;
 
+    @Column(name = "is_remote_area", nullable = false)
+    private boolean remoteArea = false;
+
+    @Column(name = "remote_allowance_percentage", nullable = false, precision = 5, scale = 2)
+    private BigDecimal remoteAllowancePercentage = BigDecimal.ZERO;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
+
+    @UpdateTimestamp
+    @Column(name = "updated_at", nullable = false)
+    private Instant updatedAt;
 
     protected StateMaster() {
     }
@@ -90,7 +105,27 @@ public class StateMaster {
         this.active = active;
     }
 
+    public boolean isRemoteArea() {
+        return remoteArea;
+    }
+
+    public void setRemoteArea(boolean remoteArea) {
+        this.remoteArea = remoteArea;
+    }
+
+    public BigDecimal getRemoteAllowancePercentage() {
+        return remoteAllowancePercentage;
+    }
+
+    public void setRemoteAllowancePercentage(BigDecimal remoteAllowancePercentage) {
+        this.remoteAllowancePercentage = remoteAllowancePercentage;
+    }
+
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public Instant getUpdatedAt() {
+        return updatedAt;
     }
 }

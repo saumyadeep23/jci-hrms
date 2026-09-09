@@ -72,6 +72,27 @@ class LeaveLedgerEntryControllerTest {
     }
 
     @Test
+    void list_financeAdminTargetingSomeoneElse_returns200() throws Exception {
+        when(leaveLedgerEntryService.listForEmployee(eq(99L))).thenReturn(List.of());
+
+        mockMvc.perform(get("/api/leave-ledger-entries").param("employeeId", "99")
+                        .with(jwt().jwt(builder -> builder.claim("employee_id", "7"))
+                                .authorities(new SimpleGrantedAuthority("ROLE_FINANCE_ADMIN"))))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void list_financeAdminFiltersByLeaveTypeCode() throws Exception {
+        when(leaveLedgerEntryService.listForEmployee(eq(99L))).thenReturn(List.of());
+
+        mockMvc.perform(get("/api/leave-ledger-entries").param("employeeId", "99").param("leaveTypeCode", "EL")
+                        .with(jwt().jwt(builder -> builder.claim("employee_id", "7"))
+                                .authorities(new SimpleGrantedAuthority("ROLE_FINANCE_ADMIN"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray());
+    }
+
+    @Test
     @WithAnonymousUser
     void list_withoutAuthentication_returns401() throws Exception {
         mockMvc.perform(get("/api/leave-ledger-entries"))

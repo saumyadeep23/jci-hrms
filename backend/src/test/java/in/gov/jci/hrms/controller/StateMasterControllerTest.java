@@ -19,6 +19,7 @@ import org.springframework.security.test.context.support.WithAnonymousUser;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -47,12 +48,13 @@ class StateMasterControllerTest {
     private StateMasterService stateMasterService;
 
     private StateMasterRequest validRequest() {
-        return new StateMasterRequest("WB", "West Bengal", StateType.STATE, true);
+        return new StateMasterRequest("WB", "West Bengal", StateType.STATE, true, false, BigDecimal.ZERO);
     }
 
     private StateMasterResponse responseFor(UUID id, StateMasterRequest request) {
         Instant now = Instant.now();
-        return new StateMasterResponse(id, request.stateCode(), request.stateName(), request.stateType(), request.active(), now);
+        return new StateMasterResponse(id, request.stateCode(), request.stateName(), request.stateType(), request.active(),
+                request.isRemoteArea(), request.remoteAllowancePercentage(), now, now);
     }
 
     @Test

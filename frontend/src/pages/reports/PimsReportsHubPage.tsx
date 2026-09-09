@@ -9,6 +9,8 @@ import { AparMatrixTab } from './pims/AparMatrixTab'
 import { IncrementDueListTab } from './pims/IncrementDueListTab'
 import { AdHocBuilderTab } from './pims/AdHocBuilderTab'
 import { SeparatedStaffTab } from './pims/SeparatedStaffTab'
+import { DeputedStaffTab } from './pims/DeputedStaffTab'
+import { SuspendedStaffTab } from './pims/SuspendedStaffTab'
 
 const TABS = [
   { key: 'cadre-strength', label: 'Cadre Strength' },
@@ -18,6 +20,8 @@ const TABS = [
   { key: 'apar-matrix', label: 'APAR Matrix' },
   { key: 'increment-due-list', label: 'Increment Due List' },
   { key: 'separated-staff', label: 'Separated Staff' },
+  { key: 'deputed-staff', label: 'Deputed Staff' },
+  { key: 'suspended-staff', label: 'Suspended Staff' },
   { key: 'ad-hoc-builder', label: 'Ad-Hoc Builder' },
 ] as const
 type TabKey = (typeof TABS)[number]['key']
@@ -64,6 +68,8 @@ export function PimsReportsHubPage() {
       {tab === 'apar-matrix' && <AparMatrixTab />}
       {tab === 'increment-due-list' && <IncrementDueListTab />}
       {tab === 'separated-staff' && <SeparatedStaffTab />}
+      {tab === 'deputed-staff' && <DeputedStaffTab />}
+      {tab === 'suspended-staff' && <SuspendedStaffTab />}
       {tab === 'ad-hoc-builder' && <AdHocBuilderTab />}
     </div>
   )

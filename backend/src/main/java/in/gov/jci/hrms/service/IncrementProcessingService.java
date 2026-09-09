@@ -51,9 +51,11 @@ public class IncrementProcessingService implements PimsReportExportSource {
     //
     // Current basic pay/grade come from regular_pay_fixations (the
     // historized, increment/promotion-aware ledger - V50), falling back to
-    // employee_employment_categories/pay_scale_master only for the rare
-    // REGULAR employee somehow missing a current fixation row - see
-    // Manpower4TierReportService's identical COALESCE reasoning.
+    // employee_employment_categories.scale_code/grade_scale_master (V60:
+    // cat.pay_scale_id/pay_scale_master is gone, cat.scale_code is the sole
+    // fallback link now - same join V60 put in vw_jci_employee_master_360)
+    // only for the rare REGULAR employee somehow missing a current fixation
+    // row - see Manpower4TierReportService's identical COALESCE reasoning.
     // "Increment Month" filters on the employee's date-of-joining month,
     // since that anniversary is what actually determines when an individual
     // REGULAR employee's annual increment falls due.
@@ -66,16 +68,16 @@ public class IncrementProcessingService implements PimsReportExportSource {
     // the belt to this query's braces).
     private static final String DUE_LIST_SQL =
             "SELECT e.id, e.employee_code, e.full_name, "
-                    + "COALESCE(rpf.scale_code, ps.grade) AS grade, "
-                    + "COALESCE(gsm.maximum_basic, ps.maximum_basic) AS maximum_basic, "
+                    + "COALESCE(rpf.scale_code, cat.scale_code) AS grade, "
+                    + "COALESCE(gsm.maximum_basic, csm.maximum_basic) AS maximum_basic, "
                     + "COALESCE(rpf.basic_pay, cat.regular_basic_pay) AS current_basic_pay, "
                     + "EXISTS(SELECT 1 FROM disciplinary_cases dc WHERE dc.employee_id = e.id AND dc.is_deleted = false "
                     + "       AND dc.status NOT IN ('CLOSED', 'EXONERATED')) AS has_active_case "
                     + "FROM employee_employment_categories cat "
                     + "JOIN employees e ON e.id = cat.employee_id AND e.deleted_at IS NULL "
-                    + "LEFT JOIN pay_scale_master ps ON ps.id = cat.pay_scale_id "
                     + "LEFT JOIN regular_pay_fixations rpf ON rpf.employee_id = e.id AND rpf.is_current = true "
                     + "LEFT JOIN grade_scale_master gsm ON gsm.scale_code = rpf.scale_code "
+                    + "LEFT JOIN grade_scale_master csm ON csm.scale_code = cat.scale_code "
                     + "LEFT JOIN employee_superannuation_details sup ON sup.employee_id = e.id "
                     + "WHERE cat.employment_category = 'REGULAR' AND cat.deleted_at IS NULL AND cat.is_active = true "
                     + "  AND COALESCE(rpf.basic_pay, cat.regular_basic_pay) IS NOT NULL "

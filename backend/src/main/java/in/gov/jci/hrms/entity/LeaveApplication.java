@@ -78,6 +78,15 @@ public class LeaveApplication implements Auditable {
     @JoinColumn(name = "approver_employee_id")
     private Employee approverEmployee;
 
+    /** Whose desk the file is on right now - starts as approverEmployee at submit() time, then moves with every forward(). */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "current_assigned_to")
+    private Employee currentAssignedTo;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "workflow_stage", nullable = false, length = 20)
+    private LeaveWorkflowStage workflowStage = LeaveWorkflowStage.SUBMITTED;
+
     /** Links a same-day-split or contiguous CL+RH pair submitted together (CombinedLeaveApplicationService) - null for every ordinary standalone application. */
     @Column(name = "group_application_id")
     private UUID groupApplicationId;
@@ -203,6 +212,22 @@ public class LeaveApplication implements Auditable {
 
     public void setApproverEmployee(Employee approverEmployee) {
         this.approverEmployee = approverEmployee;
+    }
+
+    public Employee getCurrentAssignedTo() {
+        return currentAssignedTo;
+    }
+
+    public void setCurrentAssignedTo(Employee currentAssignedTo) {
+        this.currentAssignedTo = currentAssignedTo;
+    }
+
+    public LeaveWorkflowStage getWorkflowStage() {
+        return workflowStage;
+    }
+
+    public void setWorkflowStage(LeaveWorkflowStage workflowStage) {
+        this.workflowStage = workflowStage;
     }
 
     public UUID getGroupApplicationId() {

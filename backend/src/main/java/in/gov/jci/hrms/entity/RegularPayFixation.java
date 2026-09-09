@@ -25,7 +25,7 @@ import java.util.Map;
 
 /**
  * A REGULAR employee's historized basic-pay ledger (V50) - one row per fixation event
- * (INITIAL_APPOINTMENT, PROMOTION, ...), only one is_current=true row per employee at a time
+ * (INITIAL_FIXATION, PROMOTION, ...), only one is_current=true row per employee at a time
  * (idx_uq_current_regular_fixation). Additive alongside employee_employment_categories.regular_basic_pay
  * (V29), which MovementOrderService keeps in sync on promotion so payroll's existing reader is
  * unaffected - see that migration's header comment for why both exist.
@@ -62,7 +62,7 @@ public class RegularPayFixation implements Auditable {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "fixation_reason", nullable = false, length = 100)
-    private FixationReason fixationReason = FixationReason.INITIAL_APPOINTMENT;
+    private FixationReason fixationReason = FixationReason.INITIAL_FIXATION;
 
     @Column(name = "order_ref_no", length = 100)
     private String orderRefNo;

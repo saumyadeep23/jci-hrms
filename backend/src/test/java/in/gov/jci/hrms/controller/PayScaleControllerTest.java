@@ -1,11 +1,10 @@
 package in.gov.jci.hrms.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import in.gov.jci.hrms.dto.DependencyCheckResponse;
 import in.gov.jci.hrms.dto.PayScaleRequest;
 import in.gov.jci.hrms.dto.PayScaleResponse;
 import in.gov.jci.hrms.entity.ScaleType;
-import in.gov.jci.hrms.exception.MasterDataInUseException;
-import in.gov.jci.hrms.exception.MasterDataValidationException;
 import in.gov.jci.hrms.security.SecurityConfig;
 import in.gov.jci.hrms.service.PayScaleService;
 import org.junit.jupiter.api.Test;
@@ -20,16 +19,29 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+/**
+ * Read-only surface only (Phase 1 of the pay_scale_master -> grade_scale_master
+ * cutover, V60) - see PayScaleController's own javadoc for why POST/PUT/DELETE
+ * are removed outright rather than stubbed. The 401-vs-405 split below was
+ * verified empirically, not assumed: SecurityConfig's anyRequest().authenticated()
+ * runs in the servlet filter chain, ahead of and independent of the
+ * DispatcherServlet's handler-method resolution, so an unauthenticated request
+ * is rejected before Spring ever discovers no POST/PUT/DELETE handler exists.
+ * An authenticated-but-wrong-role request, by contrast, passes that filter,
+ * reaches the dispatcher, finds no method-matching handler, and gets a plain
+ * 405 - method-level @PreAuthorize never runs because no handler method was
+ * resolved to run it against.
+ */
 @WebMvcTest(PayScaleController.class)
 @Import(SecurityConfig.class)
 @WithMockUser(roles = "HR_ADMIN")
@@ -56,71 +68,66 @@ class PayScaleControllerTest {
     }
 
     @Test
-    void create_withValidRequest_returns201WithLocationHeader() throws Exception {
-        PayScaleRequest request = validRequest();
-        when(payScaleService.create(any(PayScaleRequest.class))).thenReturn(responseFor(1L, request));
+    void getById_withValidId_returns200() throws Exception {
+        when(payScaleService.getById(1L)).thenReturn(responseFor(1L, validRequest()));
 
-        mockMvc.perform(post("/api/pay-scales")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(request)))
-                .andExpect(status().isCreated())
-                .andExpect(header().string("Location", "/api/pay-scales/1"))
+        mockMvc.perform(get("/api/pay-scales/1"))
+                .andExpect(status().isOk())
                 .andExpect(jsonPath("$.grade").value("E1"));
     }
 
     @Test
-    void create_withMissingRequiredFields_returns400() throws Exception {
-        PayScaleRequest invalid = new PayScaleRequest(null, "", null, null, null, null);
+    void list_returns200() throws Exception {
+        when(payScaleService.list(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of(responseFor(1L, validRequest()))));
 
+        mockMvc.perform(get("/api/pay-scales"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].grade").value("E1"));
+    }
+
+    @Test
+    void dependencies_returns200() throws Exception {
+        when(payScaleService.dependencies(1L)).thenReturn(new DependencyCheckResponse(false, List.of()));
+
+        mockMvc.perform(get("/api/pay-scales/1/dependencies"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.hasActiveDependencies").value(false));
+    }
+
+    @Test
+    void post_toRemovedCreateEndpoint_returns405() throws Exception {
         mockMvc.perform(post("/api/pay-scales")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(invalid)))
-                .andExpect(status().isBadRequest());
+                        .content(objectMapper.writeValueAsString(validRequest())))
+                .andExpect(status().isMethodNotAllowed());
     }
 
     @Test
-    void create_whenMinimumGreaterThanMaximum_returns400() throws Exception {
-        PayScaleRequest request = validRequest();
-        when(payScaleService.create(any(PayScaleRequest.class)))
-                .thenThrow(new MasterDataValidationException("minimumBasic must not be greater than maximumBasic"));
-
-        mockMvc.perform(post("/api/pay-scales")
+    void put_toRemovedUpdateEndpoint_returns405() throws Exception {
+        mockMvc.perform(put("/api/pay-scales/1")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(request)))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("Bad Request"));
+                        .content(objectMapper.writeValueAsString(validRequest())))
+                .andExpect(status().isMethodNotAllowed());
     }
 
     @Test
-    void delete_whenReferencedByActiveEmployee_returns409() throws Exception {
-        doThrow(new MasterDataInUseException("Pay Scale", 1L)).when(payScaleService).delete(1L);
-
+    void delete_toRemovedDeleteEndpoint_returns405() throws Exception {
         mockMvc.perform(delete("/api/pay-scales/1"))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.error").value("Conflict"));
-    }
-
-    @Test
-    void delete_whenNotReferenced_returns204() throws Exception {
-        mockMvc.perform(delete("/api/pay-scales/1"))
-                .andExpect(status().isNoContent());
+                .andExpect(status().isMethodNotAllowed());
     }
 
     @Test
     @WithAnonymousUser
-    void create_withoutAuthentication_returns401() throws Exception {
-        mockMvc.perform(post("/api/pay-scales")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(validRequest())))
+    void get_withoutAuthentication_returns401() throws Exception {
+        mockMvc.perform(get("/api/pay-scales/1"))
                 .andExpect(status().isUnauthorized());
     }
 
     @Test
     @WithMockUser(roles = "EMPLOYEE")
-    void create_withWrongRole_returns403() throws Exception {
-        mockMvc.perform(post("/api/pay-scales")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(validRequest())))
+    void getById_withWrongRole_returns403() throws Exception {
+        mockMvc.perform(get("/api/pay-scales/1"))
                 .andExpect(status().isForbidden());
     }
 }

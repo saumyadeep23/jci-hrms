@@ -24,11 +24,22 @@ public class LeaveLedgerEntryController {
         this.leaveLedgerEntryService = leaveLedgerEntryService;
     }
 
+    /**
+     * FINANCE_ADMIN is added on top of attendanceAggSec's own self-or-HR_ADMIN/SUPER_ADMIN rule
+     * (not folded into that shared bean, which other, non-leave endpoints also use) so a Finance
+     * (Gate 2) reviewer can pull up an employee's EL ledger from the encashment admin review queue.
+     */
     @GetMapping
-    @PreAuthorize("isAuthenticated() and @attendanceAggSec.canEvaluateFor(authentication, #employeeId)")
-    public List<LeaveLedgerEntryResponse> list(@RequestParam(required = false) Long employeeId, Authentication authentication) {
+    @PreAuthorize("isAuthenticated() and (@attendanceAggSec.canEvaluateFor(authentication, #employeeId) or hasAnyRole('FINANCE_ADMIN'))")
+    public List<LeaveLedgerEntryResponse> list(@RequestParam(required = false) Long employeeId,
+                                                @RequestParam(required = false) String leaveTypeCode,
+                                                Authentication authentication) {
         Long target = employeeId != null ? employeeId : selfOrThrow(authentication);
-        return leaveLedgerEntryService.listForEmployee(target);
+        List<LeaveLedgerEntryResponse> entries = leaveLedgerEntryService.listForEmployee(target);
+        if (leaveTypeCode != null && !leaveTypeCode.isBlank()) {
+            entries = entries.stream().filter(e -> leaveTypeCode.equalsIgnoreCase(e.leaveTypeCode())).toList();
+        }
+        return entries;
     }
 
     private Long selfOrThrow(Authentication authentication) {

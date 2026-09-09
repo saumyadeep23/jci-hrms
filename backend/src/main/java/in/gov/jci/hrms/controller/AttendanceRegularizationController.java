@@ -43,10 +43,24 @@ public class AttendanceRegularizationController {
         return ResponseEntity.status(HttpStatus.CREATED).body(attendanceRegularizationService.submit(request));
     }
 
+    /**
+     * Widened from HR_ADMIN/SUPER_ADMIN-only: the designated approver resolved at submission time
+     * (see SupervisorResolutionService) may be a plain EMPLOYEE-role manager, not necessarily an
+     * HR_ADMIN - the GET .../pending-approval queue below already grants any authenticated employee
+     * their own queue, so this write path now matches it instead of 403ing every non-HR_ADMIN who
+     * views a queue they can't act on. There is no HR_ADMIN/SUPER_ADMIN override here though: an admin
+     * can see every request (see GET /all below) but acting on one still requires being the actual
+     * designated approver - the service enforces that.
+     */
     @PatchMapping("/{id}/approve")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
-    public AttendanceRegularizationResponse approve(@PathVariable Long id, @Valid @RequestBody RegularizationDecisionRequest decision) {
-        return attendanceRegularizationService.approve(id, decision);
+    @PreAuthorize("isAuthenticated()")
+    public AttendanceRegularizationResponse approve(@PathVariable Long id, @Valid @RequestBody RegularizationDecisionRequest decision,
+                                                      Authentication authentication) {
+        Long callerId = SecurityUtils.currentEmployeeId(authentication);
+        if (callerId == null) {
+            throw new BusinessRuleViolationException("Your token has no employee_id claim - cannot resolve who is deciding this application");
+        }
+        return attendanceRegularizationService.approve(id, decision, callerId);
     }
 
     @GetMapping("/mine")
@@ -70,5 +84,23 @@ public class AttendanceRegularizationController {
         return regularizationRepository.findByDesignatedApproverIdAndApprovalStatus(employeeId, ApprovalStatus.PENDING).stream()
                 .map(AttendanceRegularizationResponse::from)
                 .toList();
+    }
+
+    /** Every request ever routed to this approver, any status - backs RegularizationApprovalQueuePage's metric cards and Pending/Approved/Rejected status filter. */
+    @GetMapping("/mine-as-approver")
+    @PreAuthorize("isAuthenticated()")
+    public List<AttendanceRegularizationResponse> mineAsApprover(Authentication authentication) {
+        Long employeeId = SecurityUtils.currentEmployeeId(authentication);
+        if (employeeId == null) {
+            throw new BusinessRuleViolationException("Your token has no employee_id claim - cannot resolve your approval history");
+        }
+        return attendanceRegularizationService.findAllDecidedByApprover(employeeId);
+    }
+
+    /** HR_ADMIN/SUPER_ADMIN organization-wide visibility - every regularization request, any status, regardless of designated approver. View-only: PATCH .../approve still requires being the actual designated approver on that request. */
+    @GetMapping("/all")
+    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    public List<AttendanceRegularizationResponse> all() {
+        return attendanceRegularizationService.findAll();
     }
 }

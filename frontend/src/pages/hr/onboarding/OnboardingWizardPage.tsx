@@ -52,6 +52,7 @@ import { Step5PastService } from './steps/Step5PastService'
 import { Step6Employment } from './steps/Step6Employment'
 import { Step7Family } from './steps/Step7Family'
 import { Step8Review } from './steps/Step8Review'
+import { Step9CompanyAccommodation } from './steps/Step9CompanyAccommodation'
 
 const STEP_LABELS = [
   'Personal & Bio-Data',
@@ -61,6 +62,7 @@ const STEP_LABELS = [
   'Past Service',
   'Employment & Post',
   'Family & Nominees',
+  'Company Accommodation',
   'Review & Submit',
 ]
 const TOTAL_STEPS = STEP_LABELS.length
@@ -131,7 +133,7 @@ export function OnboardingWizardPage() {
         return { employment: employmentToRequest(employment) }
       case 7:
         return { family: familyToRequest(family), ...socialProfilePayload }
-      case 8:
+      case 9:
         return { documents: documents.map(documentToRequest) }
       default:
         return {}
@@ -237,7 +239,8 @@ export function OnboardingWizardPage() {
         {step === 7 && (
           <Step7Family value={family} onChange={setFamily} socialProfile={socialProfile} onSocialProfileChange={setSocialProfile} />
         )}
-        {step === 8 && (
+        {step === 8 && <Step9CompanyAccommodation />}
+        {step === 9 && (
           <Step8Review
             personal={personal}
             presentAddress={presentAddress}

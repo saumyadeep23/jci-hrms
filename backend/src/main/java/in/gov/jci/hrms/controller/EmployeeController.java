@@ -90,8 +90,9 @@ public class EmployeeController {
      * rows in whatever unstable physical order Postgres happened to store them in, which could - and
      * did - shift a freshly-updated row off the first page entirely).
      */
+    /** Widened to CPF_ADMIN/FINANCE_ADMIN: the CPF Trust module's employee pickers (Incoming Transfers, Loan Origination) need to search/resolve an employee by code or name, and those roles already see full employee-level CPF ledger/withdrawal data elsewhere in this same module (PfLedgerController, CpfTrustController). */
     @GetMapping
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('HR_ADMIN', 'CPF_ADMIN', 'FINANCE_ADMIN', 'SUPER_ADMIN')")
     public Page<EmployeeResponse> list(@RequestParam(required = false) String search,
                                         @RequestParam(required = false) Long roId,
                                         @RequestParam(required = false) Long designationId,

@@ -79,6 +79,20 @@ public class GlobalExceptionHandler {
                 .body(ErrorResponse.of(HttpStatus.UNPROCESSABLE_ENTITY.value(), "Unprocessable Entity", ex.getMessage()));
     }
 
+    /** More specific than BusinessRuleViolationException (its supertype) - same pattern as handleInsufficientLeaveBalance, but 409 since it's a timing conflict, not a validation failure. */
+    @ExceptionHandler(PredecessorPayrollUnfinalizedException.class)
+    public ResponseEntity<ErrorResponse> handlePredecessorPayrollUnfinalized(PredecessorPayrollUnfinalizedException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ErrorResponse.of(HttpStatus.CONFLICT.value(), "Conflict", ex.getMessage()));
+    }
+
+    /** More specific than BusinessRuleViolationException (its supertype) - same pattern as handlePredecessorPayrollUnfinalized. */
+    @ExceptionHandler(DuplicatePendingRegularizationException.class)
+    public ResponseEntity<ErrorResponse> handleDuplicatePendingRegularization(DuplicatePendingRegularizationException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ErrorResponse.of(HttpStatus.CONFLICT.value(), "Conflict", ex.getMessage()));
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ErrorResponse> handleValidation(MethodArgumentNotValidException ex) {
         List<FieldError> fieldErrors = ex.getBindingResult().getFieldErrors();

@@ -10,10 +10,13 @@ import type {
   LeaveApplicationRequest,
   LeaveApplicationResponse,
   LeaveBalanceResponse,
+  LeaveEntitlementBalanceResponse,
   LeaveSession,
   LeaveTypeResponse,
   Page,
 } from '../../types/api'
+
+const EL_CODE = 'EL'
 
 const HALF_DAY_SESSIONS: { value: LeaveSession; label: string }[] = [
   { value: 'FULL_DAY', label: 'Full Day' },
@@ -76,6 +79,7 @@ export function LeaveApplicationForm({
 
   const selectedLeaveType = activeLeaveTypes.find((lt) => String(lt.id) === leaveTypeId)
   const isCl = selectedLeaveType?.code === 'CL'
+  const isEl = selectedLeaveType?.code === EL_CODE
   const effectiveLeaveSession: LeaveSession = isCl ? leaveSession : 'FULL_DAY'
   const effectiveEndDate = effectiveLeaveSession === 'FULL_DAY' ? endDate : startDate
 
@@ -83,8 +87,31 @@ export function LeaveApplicationForm({
   const balancesQuery = useQuery({
     queryKey: ['leave-balances-mine', balanceYear],
     queryFn: async () => (await apiClient.get<LeaveBalanceResponse[]>('/leave-balances/mine', { params: { year: balanceYear } })).data,
+    enabled: !isEl,
   })
   const selectedBalance = balancesQuery.data?.find((b) => String(b.leaveTypeId) === leaveTypeId)
+
+  // EL's "current balance" is NOT the generic leave_balances row (that ledger
+  // is never debited/credited for EL at all - see LeaveApplicationService,
+  // which only touches it for non-EL types - so it holds a stale, unrelated
+  // number for EL). The real EL balance, split into encashable (preserved,
+  // never usable for taking physical leave) and enjoyable (debited first for
+  // physical leave - see LeaveBalanceSplitCard's own note), lives in the
+  // leave_entitlement_balance sub-ledger instead.
+  const elEntitlementQuery = useQuery({
+    queryKey: ['leave-entitlement-balance-mine', balanceYear],
+    queryFn: async () =>
+      (await apiClient.get<LeaveEntitlementBalanceResponse[]>('/v1/leave-entitlement-balance/mine', { params: { year: balanceYear } })).data,
+    enabled: isEl,
+  })
+  const selectedElBalance = elEntitlementQuery.data?.find((b) => String(b.leaveTypeId) === leaveTypeId)
+  // Computed from the split rather than trusted from selectedElBalance.availableBalance directly -
+  // see LeaveBalanceSplitCard's identical reasoning.
+  const selectedElTotalAvailable = selectedElBalance
+    ? Number(selectedElBalance.encashableAvailable || 0) + Number(selectedElBalance.enjoyableAvailable || 0)
+    : undefined
+  const balanceLoading = isEl ? elEntitlementQuery.isLoading : balancesQuery.isLoading
+  const effectiveAvailableDays = isEl ? selectedElBalance?.enjoyableAvailable : selectedBalance?.availableDays
 
   const debounced = useDebouncedValue({ leaveTypeId, startDate, endDate: effectiveEndDate, leaveSession: effectiveLeaveSession }, 400)
   const previewReady = Boolean(debounced.leaveTypeId && debounced.startDate && debounced.endDate)
@@ -113,7 +140,7 @@ export function LeaveApplicationForm({
   const attachmentRequired = attachmentRequiredFor(selectedLeaveType, debitableDays)
   const previewValid = previewReady && !previewQuery.isFetching && !isStale && previewQuery.data?.valid === true
   const overBalance =
-    previewValid && debitableDays !== null && selectedBalance !== undefined && debitableDays > selectedBalance.availableDays
+    previewValid && debitableDays !== null && effectiveAvailableDays !== undefined && debitableDays > effectiveAvailableDays
 
   function buildPayload(): LeaveApplicationRequest {
     return {
@@ -205,9 +232,13 @@ export function LeaveApplicationForm({
           </select>
           {leaveTypeId && (
             <div className="mt-1.5">
-              {balancesQuery.isLoading ? (
+              {balanceLoading ? (
                 <span className="text-xs text-slate-400">Checking balance...</span>
-              ) : selectedBalance ? (
+              ) : isEl && selectedElBalance ? (
+                <Badge tone={selectedElBalance.enjoyableAvailable > 0 ? 'success' : 'danger'}>
+                  Current Balance: {selectedElBalance.enjoyableAvailable} Days (Enjoyable) / {selectedElTotalAvailable} Days (Total)
+                </Badge>
+              ) : !isEl && selectedBalance ? (
                 <Badge tone={selectedBalance.availableDays > 0 ? 'success' : 'danger'}>
                   Current Balance: {selectedBalance.availableDays} Days
                 </Badge>
@@ -278,9 +309,9 @@ export function LeaveApplicationForm({
           <ErrorState message={previewQuery.data.message ?? 'This application violates a CCS leave rule.'} />
         )}
 
-        {overBalance && selectedBalance && debitableDays !== null && (
+        {overBalance && effectiveAvailableDays !== undefined && debitableDays !== null && (
           <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700">
-            Insufficient leave balance: Available {selectedBalance.availableDays} days, Requested {debitableDays} days
+            Insufficient leave balance: Available {effectiveAvailableDays} days, Requested {debitableDays} days
           </div>
         )}
 

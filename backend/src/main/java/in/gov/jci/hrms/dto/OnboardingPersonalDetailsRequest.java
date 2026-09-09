@@ -32,6 +32,8 @@ public record OnboardingPersonalDetailsRequest(
         @Size(max = 50) String motherTongue,
         @NotBlank @Pattern(regexp = "^[A-Z]{5}[0-9]{4}[A-Z]$") String panNumber,
         @Size(max = 20) String cpfAcNo,
+        /** EPFO Universal Account Number - portable across employers, distinct from cpfAcNo. Optional. */
+        @Pattern(regexp = "^[0-9]{12}$") String uanNo,
         @Pattern(regexp = "^[0-9]{12}$") String aadhaarNumber,
         @NotBlank @Email @Size(max = 255) String personalEmail,
         @Pattern(regexp = "^[A-Za-z0-9._%+-]+@jcimail\\.in$") String officialEmail,

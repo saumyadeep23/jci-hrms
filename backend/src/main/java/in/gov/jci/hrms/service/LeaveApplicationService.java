@@ -4,17 +4,23 @@ import in.gov.jci.hrms.dto.LeaveApplicationPreviewRequest;
 import in.gov.jci.hrms.dto.LeaveApplicationPreviewResponse;
 import in.gov.jci.hrms.dto.LeaveApplicationRequest;
 import in.gov.jci.hrms.dto.LeaveApplicationResponse;
+import in.gov.jci.hrms.dto.LeaveRoutingActionResponse;
+import in.gov.jci.hrms.dto.LeaveSanctionHistoryResponse;
 import in.gov.jci.hrms.entity.Employee;
+import in.gov.jci.hrms.entity.LeaveActionType;
 import in.gov.jci.hrms.entity.LeaveApplication;
+import in.gov.jci.hrms.entity.LeaveApplicationAction;
 import in.gov.jci.hrms.entity.LeaveApplicationStatus;
 import in.gov.jci.hrms.entity.LeaveBalance;
 import in.gov.jci.hrms.entity.LeaveSession;
 import in.gov.jci.hrms.entity.LeaveType;
+import in.gov.jci.hrms.entity.LeaveWorkflowStage;
 import in.gov.jci.hrms.exception.BusinessRuleViolationException;
 import in.gov.jci.hrms.exception.EmployeeNotFoundException;
 import in.gov.jci.hrms.exception.InsufficientLeaveBalanceException;
 import in.gov.jci.hrms.exception.MasterDataNotFoundException;
 import in.gov.jci.hrms.repository.EmployeeRepository;
+import in.gov.jci.hrms.repository.LeaveApplicationActionRepository;
 import in.gov.jci.hrms.repository.LeaveApplicationRepository;
 import in.gov.jci.hrms.repository.LeaveBalanceRepository;
 import in.gov.jci.hrms.repository.LeaveTypeRepository;
@@ -24,7 +30,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
 
 /**
  * Implements the FR-LV.5 leave-balance-reservation workflow:
@@ -50,6 +59,7 @@ public class LeaveApplicationService {
     private static final String COMMUTED_LEAVE_CODE = "COMMUTED";
     private static final String HPL_LEAVE_CODE = "HPL";
     private static final BigDecimal COMMUTED_LEAVE_HPL_MULTIPLIER = BigDecimal.valueOf(2);
+    private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
 
     private final LeaveApplicationRepository leaveApplicationRepository;
     private final LeaveTypeRepository leaveTypeRepository;
@@ -57,19 +67,22 @@ public class LeaveApplicationService {
     private final EmployeeRepository employeeRepository;
     private final SupervisorResolutionService supervisorResolutionService;
     private final LeaveValidationService leaveValidationService;
+    private final LeaveApplicationActionRepository leaveApplicationActionRepository;
 
     public LeaveApplicationService(LeaveApplicationRepository leaveApplicationRepository,
                                     LeaveTypeRepository leaveTypeRepository,
                                     LeaveBalanceRepository leaveBalanceRepository,
                                     EmployeeRepository employeeRepository,
                                     SupervisorResolutionService supervisorResolutionService,
-                                    LeaveValidationService leaveValidationService) {
+                                    LeaveValidationService leaveValidationService,
+                                    LeaveApplicationActionRepository leaveApplicationActionRepository) {
         this.leaveApplicationRepository = leaveApplicationRepository;
         this.leaveTypeRepository = leaveTypeRepository;
         this.leaveBalanceRepository = leaveBalanceRepository;
         this.employeeRepository = employeeRepository;
         this.supervisorResolutionService = supervisorResolutionService;
         this.leaveValidationService = leaveValidationService;
+        this.leaveApplicationActionRepository = leaveApplicationActionRepository;
     }
 
     @Transactional
@@ -166,15 +179,27 @@ public class LeaveApplicationService {
                 .ifPresent(resolution -> {
                     application.setApproverEmployee(resolution.employee());
                     application.setApproverPost(resolution.post());
+                    application.setCurrentAssignedTo(resolution.employee());
                 });
 
         application.setStatus(LeaveApplicationStatus.PENDING_APPROVAL);
+        application.setWorkflowStage(LeaveWorkflowStage.SUBMITTED);
+        logAction(application, application.getEmployee(), LeaveActionType.SUBMIT, null, null);
         return LeaveApplicationResponse.from(application);
     }
 
     @Transactional
     public LeaveApplicationResponse approve(Long id) {
-        LeaveApplication application = findOrThrow(id);
+        return doSanction(findOrThrow(id), null, null);
+    }
+
+    /** The multi-tier routing counterpart of approve() - identical balance-debit logic, plus workflow_stage/action-log bookkeeping. Both exist because approve() (no actor/remarks) is still used by the pre-existing single-tier controller/frontend. */
+    @Transactional
+    public LeaveApplicationResponse sanction(Long id, String remarks, Long actingEmployeeId) {
+        return doSanction(findOrThrow(id), remarks, actingEmployeeId);
+    }
+
+    private LeaveApplicationResponse doSanction(LeaveApplication application, String remarks, Long actingEmployeeId) {
         requireStatus(application, LeaveApplicationStatus.PENDING_APPROVAL);
 
         DebitTarget debitTarget = resolveDebitTarget(application);
@@ -184,17 +209,105 @@ public class LeaveApplicationService {
         balance.setUsedDays(balance.getUsedDays().add(debitTarget.amount()));
 
         application.setStatus(LeaveApplicationStatus.APPROVED);
+        application.setWorkflowStage(LeaveWorkflowStage.SANCTIONED);
+        Employee actor = actingEmployeeId != null ? resolveEmployee(actingEmployeeId) : application.getCurrentAssignedTo();
+        if (actor != null) {
+            logAction(application, actor, LeaveActionType.SANCTION, null, remarks);
+        }
         return LeaveApplicationResponse.from(application);
     }
 
     @Transactional
     public LeaveApplicationResponse reject(Long id) {
-        LeaveApplication application = findOrThrow(id);
+        return doReject(findOrThrow(id), null, null);
+    }
+
+    /** The multi-tier routing counterpart of reject() - same balance-release logic, plus mandatory remarks and action-log bookkeeping. */
+    @Transactional
+    public LeaveApplicationResponse rejectWithRemarks(Long id, String remarks, Long actingEmployeeId) {
+        if (remarks == null || remarks.isBlank()) {
+            throw new BusinessRuleViolationException("Remarks are mandatory when rejecting a leave application");
+        }
+        return doReject(findOrThrow(id), remarks, actingEmployeeId);
+    }
+
+    private LeaveApplicationResponse doReject(LeaveApplication application, String remarks, Long actingEmployeeId) {
         requireStatus(application, LeaveApplicationStatus.PENDING_APPROVAL);
 
         releaseReservation(application);
         application.setStatus(LeaveApplicationStatus.REJECTED);
+        application.setWorkflowStage(LeaveWorkflowStage.REJECTED);
+        Employee actor = actingEmployeeId != null ? resolveEmployee(actingEmployeeId) : application.getCurrentAssignedTo();
+        if (actor != null) {
+            logAction(application, actor, LeaveActionType.REJECT, null, remarks);
+        }
         return LeaveApplicationResponse.from(application);
+    }
+
+    /**
+     * Reassigns the file to a new current desk without deciding it - the application stays
+     * PENDING_APPROVAL throughout (status only ever moves at sanction()/reject()). Caller
+     * authorization (current assignee or admin) is enforced at the controller via
+     * @leaveSec.isCurrentAssignee, not here.
+     */
+    @Transactional
+    public LeaveApplicationResponse forward(Long id, Long forwardedToEmployeeId, String remarks, Long actingEmployeeId) {
+        LeaveApplication application = findOrThrow(id);
+        requireStatus(application, LeaveApplicationStatus.PENDING_APPROVAL);
+
+        Employee forwardedTo = resolveEmployee(forwardedToEmployeeId);
+        Employee actor = actingEmployeeId != null ? resolveEmployee(actingEmployeeId) : application.getCurrentAssignedTo();
+
+        application.setCurrentAssignedTo(forwardedTo);
+        application.setWorkflowStage(LeaveWorkflowStage.RECOMMENDED);
+        if (actor != null) {
+            logAction(application, actor, LeaveActionType.RECOMMEND_FORWARD, forwardedTo, remarks);
+        }
+        return LeaveApplicationResponse.from(application);
+    }
+
+    public List<LeaveRoutingActionResponse> getRoutingHistory(Long applicationId) {
+        findOrThrow(applicationId);
+        return leaveApplicationActionRepository.findByApplicationIdOrderByCreatedAtAsc(applicationId).stream()
+                .map(LeaveRoutingActionResponse::from)
+                .toList();
+    }
+
+    /**
+     * Month/year-wise sanction history register - every finalized (APPROVED/REJECTED) application
+     * in the period, month null/0 returns the whole year, status "ALL" (or null) applies no filter.
+     * forwardedByName is the last RECOMMEND_FORWARD actor in the application's own action log, null
+     * if it was decided without ever being forwarded.
+     */
+    public List<LeaveSanctionHistoryResponse> getSanctionsHistory(int year, Integer month, String status) {
+        LocalDate periodStart = LocalDate.of(year, month != null && month > 0 ? month : 1, 1);
+        LocalDate periodEnd = month != null && month > 0 ? periodStart.withDayOfMonth(periodStart.lengthOfMonth()) : LocalDate.of(year, 12, 31);
+
+        return leaveApplicationRepository.findAll().stream()
+                .filter(a -> a.getStatus() == LeaveApplicationStatus.APPROVED || a.getStatus() == LeaveApplicationStatus.REJECTED)
+                .filter(a -> !a.getUpdatedAt().atZone(IST).toLocalDate().isBefore(periodStart)
+                        && !a.getUpdatedAt().atZone(IST).toLocalDate().isAfter(periodEnd))
+                .filter(a -> status == null || status.isBlank() || "ALL".equalsIgnoreCase(status)
+                        || a.getStatus().name().equalsIgnoreCase(status))
+                .map(a -> {
+                    List<LeaveApplicationAction> actions = leaveApplicationActionRepository.findByApplicationIdOrderByCreatedAtAsc(a.getId());
+                    String forwardedByName = actions.stream()
+                            .filter(action -> action.getActionType() == LeaveActionType.RECOMMEND_FORWARD)
+                            .reduce((first, second) -> second)
+                            .map(action -> action.getActionBy().getFullName())
+                            .orElse(null);
+                    String sanctionedByName = actions.stream()
+                            .filter(action -> action.getActionType() == LeaveActionType.SANCTION || action.getActionType() == LeaveActionType.REJECT)
+                            .findFirst()
+                            .map(action -> action.getActionBy().getFullName())
+                            .orElse(null);
+                    return LeaveSanctionHistoryResponse.from(a, forwardedByName, sanctionedByName, a.getUpdatedAt());
+                })
+                .toList();
+    }
+
+    private void logAction(LeaveApplication application, Employee actionBy, LeaveActionType actionType, Employee forwardedTo, String remarks) {
+        leaveApplicationActionRepository.save(new LeaveApplicationAction(application, actionBy, actionType, forwardedTo, remarks));
     }
 
     @Transactional

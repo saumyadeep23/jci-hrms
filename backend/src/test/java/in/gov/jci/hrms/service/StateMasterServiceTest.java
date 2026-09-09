@@ -7,6 +7,7 @@ import in.gov.jci.hrms.entity.StateType;
 import in.gov.jci.hrms.exception.MasterDataConflictException;
 import in.gov.jci.hrms.exception.MasterDataInUseException;
 import in.gov.jci.hrms.exception.MasterDataNotFoundException;
+import in.gov.jci.hrms.exception.MasterDataValidationException;
 import in.gov.jci.hrms.repository.DistrictMasterRepository;
 import in.gov.jci.hrms.repository.StateMasterRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -17,6 +18,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.math.BigDecimal;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -41,7 +43,7 @@ class StateMasterServiceTest {
     }
 
     private StateMasterRequest validRequest() {
-        return new StateMasterRequest("WB", "West Bengal", StateType.STATE, true);
+        return new StateMasterRequest("WB", "West Bengal", StateType.STATE, true, false, BigDecimal.ZERO);
     }
 
     private StateMaster entityFrom(UUID id, StateMasterRequest request) {
@@ -89,12 +91,51 @@ class StateMasterServiceTest {
         when(stateMasterRepository.findById(id)).thenReturn(Optional.of(state));
         when(stateMasterRepository.saveAndFlush(any(StateMaster.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        StateMasterRequest updated = new StateMasterRequest("KA", "Karnataka", StateType.STATE, false);
+        StateMasterRequest updated = new StateMasterRequest("KA", "Karnataka", StateType.STATE, false, false, BigDecimal.ZERO);
         StateMasterResponse response = stateMasterService.update(id, updated);
 
         assertThat(response.stateCode()).isEqualTo("KA");
         assertThat(response.stateName()).isEqualTo("Karnataka");
         assertThat(response.active()).isFalse();
+    }
+
+    @Test
+    void create_withRemoteAreaTrueAndZeroPercentage_throwsMasterDataValidationException() {
+        StateMasterRequest request = new StateMasterRequest("AR", "Arunachal Pradesh", StateType.STATE, true, true, BigDecimal.ZERO);
+
+        assertThatThrownBy(() -> stateMasterService.create(request))
+                .isInstanceOf(MasterDataValidationException.class);
+    }
+
+    @Test
+    void create_withRemoteAreaTrueAndOver100Percentage_throwsMasterDataValidationException() {
+        StateMasterRequest request = new StateMasterRequest("AR", "Arunachal Pradesh", StateType.STATE, true, true, new BigDecimal("100.01"));
+
+        assertThatThrownBy(() -> stateMasterService.create(request))
+                .isInstanceOf(MasterDataValidationException.class);
+    }
+
+    @Test
+    void create_withRemoteAreaFalseAndNonZeroPercentage_throwsMasterDataValidationException() {
+        StateMasterRequest request = new StateMasterRequest("WB", "West Bengal", StateType.STATE, true, false, new BigDecimal("10.00"));
+
+        assertThatThrownBy(() -> stateMasterService.create(request))
+                .isInstanceOf(MasterDataValidationException.class);
+    }
+
+    @Test
+    void create_withValidRemoteAreaRate_succeeds() {
+        StateMasterRequest request = new StateMasterRequest("AR", "Arunachal Pradesh", StateType.STATE, true, true, new BigDecimal("10.00"));
+        UUID id = UUID.randomUUID();
+        StateMaster saved = entityFrom(id, request);
+        saved.setRemoteArea(true);
+        saved.setRemoteAllowancePercentage(new BigDecimal("10.00"));
+        when(stateMasterRepository.saveAndFlush(any(StateMaster.class))).thenReturn(saved);
+
+        StateMasterResponse response = stateMasterService.create(request);
+
+        assertThat(response.isRemoteArea()).isTrue();
+        assertThat(response.remoteAllowancePercentage()).isEqualByComparingTo("10.00");
     }
 
     @Test

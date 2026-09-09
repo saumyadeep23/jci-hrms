@@ -17,6 +17,7 @@ import in.gov.jci.hrms.exception.EmployeeNotFoundException;
 import in.gov.jci.hrms.exception.InsufficientLeaveBalanceException;
 import in.gov.jci.hrms.exception.MasterDataNotFoundException;
 import in.gov.jci.hrms.repository.EmployeeRepository;
+import in.gov.jci.hrms.repository.LeaveApplicationActionRepository;
 import in.gov.jci.hrms.repository.LeaveApplicationRepository;
 import in.gov.jci.hrms.repository.LeaveBalanceRepository;
 import in.gov.jci.hrms.repository.LeaveTypeRepository;
@@ -57,6 +58,8 @@ class LeaveApplicationServiceTest {
     private SupervisorResolutionService supervisorResolutionService;
     @Mock
     private LeaveValidationService leaveValidationService;
+    @Mock
+    private LeaveApplicationActionRepository leaveApplicationActionRepository;
 
     private LeaveApplicationService leaveApplicationService;
 
@@ -66,7 +69,8 @@ class LeaveApplicationServiceTest {
     @BeforeEach
     void setUp() {
         leaveApplicationService = new LeaveApplicationService(leaveApplicationRepository, leaveTypeRepository,
-                leaveBalanceRepository, employeeRepository, supervisorResolutionService, leaveValidationService);
+                leaveBalanceRepository, employeeRepository, supervisorResolutionService, leaveValidationService,
+                leaveApplicationActionRepository);
 
         Department department = new Department("ENG", "Engineering");
         Designation designation = new Designation("Field Officer");
@@ -537,5 +541,221 @@ class LeaveApplicationServiceTest {
 
         assertThatThrownBy(() -> leaveApplicationService.submit(APPLICATION_ID))
                 .isInstanceOf(BusinessRuleViolationException.class);
+    }
+
+    // ---- multi-tier routing: forward / sanction / rejectWithRemarks / getRoutingHistory / getSanctionsHistory ----
+
+    private Employee employeeWithId(long id, String code, String firstName) {
+        Employee e = new Employee(code, firstName, "Test", firstName.toLowerCase() + "@example.com",
+                LocalDate.of(2020, 1, 1), employee.getDepartment(), employee.getDesignation());
+        ReflectionTestUtils.setField(e, "id", id);
+        return e;
+    }
+
+    @Test
+    void forward_whenPendingApproval_movesCurrentAssignedToAndLogsRecommendForward() {
+        LeaveApplication application = applicationFrom(APPLICATION_ID, validRequest());
+        application.setStatus(LeaveApplicationStatus.PENDING_APPROVAL);
+        Employee actor = employeeWithId(20L, "EMP-020", "Ravi");
+        Employee forwardedTo = employeeWithId(99L, "EMP-099", "Meera");
+        application.setCurrentAssignedTo(actor);
+
+        when(leaveApplicationRepository.findById(APPLICATION_ID)).thenReturn(Optional.of(application));
+        when(employeeRepository.findById(99L)).thenReturn(Optional.of(forwardedTo));
+        when(employeeRepository.findById(20L)).thenReturn(Optional.of(actor));
+
+        LeaveApplicationResponse response = leaveApplicationService.forward(APPLICATION_ID, 99L, "Please review", 20L);
+
+        assertThat(response.workflowStage()).isEqualTo(in.gov.jci.hrms.entity.LeaveWorkflowStage.RECOMMENDED);
+        assertThat(response.currentAssignedToEmployeeId()).isEqualTo(99L);
+        assertThat(response.status()).isEqualTo(LeaveApplicationStatus.PENDING_APPROVAL);
+
+        org.mockito.ArgumentCaptor<in.gov.jci.hrms.entity.LeaveApplicationAction> captor =
+                org.mockito.ArgumentCaptor.forClass(in.gov.jci.hrms.entity.LeaveApplicationAction.class);
+        org.mockito.Mockito.verify(leaveApplicationActionRepository).save(captor.capture());
+        assertThat(captor.getValue().getActionType()).isEqualTo(in.gov.jci.hrms.entity.LeaveActionType.RECOMMEND_FORWARD);
+        assertThat(captor.getValue().getActionBy().getId()).isEqualTo(20L);
+        assertThat(captor.getValue().getForwardedTo().getId()).isEqualTo(99L);
+        assertThat(captor.getValue().getRemarks()).isEqualTo("Please review");
+    }
+
+    @Test
+    void forward_whenNotPendingApproval_throwsBusinessRuleViolationException() {
+        LeaveApplication application = applicationFrom(APPLICATION_ID, validRequest());
+        when(leaveApplicationRepository.findById(APPLICATION_ID)).thenReturn(Optional.of(application));
+
+        assertThatThrownBy(() -> leaveApplicationService.forward(APPLICATION_ID, 99L, "remarks", 20L))
+                .isInstanceOf(BusinessRuleViolationException.class);
+    }
+
+    @Test
+    void sanction_withActingEmployee_debitsBalanceAndLogsSanctionAction() {
+        LeaveApplication application = applicationFrom(APPLICATION_ID, validRequest());
+        application.setStatus(LeaveApplicationStatus.PENDING_APPROVAL);
+        LeaveBalance balance = balanceOf(new BigDecimal("30.0"), new BigDecimal("2.0"), new BigDecimal("3.0"));
+        Employee actor = employeeWithId(20L, "EMP-020", "Ravi");
+
+        when(leaveApplicationRepository.findById(APPLICATION_ID)).thenReturn(Optional.of(application));
+        when(leaveBalanceRepository.findByEmployeeIdAndLeaveTypeIdAndYear(EMPLOYEE_ID, LEAVE_TYPE_ID, YEAR))
+                .thenReturn(Optional.of(balance));
+        when(employeeRepository.findById(20L)).thenReturn(Optional.of(actor));
+
+        LeaveApplicationResponse response = leaveApplicationService.sanction(APPLICATION_ID, "Approved as recommended", 20L);
+
+        assertThat(response.status()).isEqualTo(LeaveApplicationStatus.APPROVED);
+        assertThat(response.workflowStage()).isEqualTo(in.gov.jci.hrms.entity.LeaveWorkflowStage.SANCTIONED);
+        assertThat(balance.getReservedDays()).isEqualByComparingTo("0.0");
+        assertThat(balance.getUsedDays()).isEqualByComparingTo("5.0");
+
+        org.mockito.ArgumentCaptor<in.gov.jci.hrms.entity.LeaveApplicationAction> captor =
+                org.mockito.ArgumentCaptor.forClass(in.gov.jci.hrms.entity.LeaveApplicationAction.class);
+        org.mockito.Mockito.verify(leaveApplicationActionRepository).save(captor.capture());
+        assertThat(captor.getValue().getActionType()).isEqualTo(in.gov.jci.hrms.entity.LeaveActionType.SANCTION);
+        assertThat(captor.getValue().getRemarks()).isEqualTo("Approved as recommended");
+    }
+
+    @Test
+    void sanction_withoutActingEmployeeId_fallsBackToCurrentAssignedToAsActor() {
+        LeaveApplication application = applicationFrom(APPLICATION_ID, validRequest());
+        application.setStatus(LeaveApplicationStatus.PENDING_APPROVAL);
+        LeaveBalance balance = balanceOf(new BigDecimal("30.0"), new BigDecimal("2.0"), new BigDecimal("3.0"));
+        Employee assignee = employeeWithId(20L, "EMP-020", "Ravi");
+        application.setCurrentAssignedTo(assignee);
+
+        when(leaveApplicationRepository.findById(APPLICATION_ID)).thenReturn(Optional.of(application));
+        when(leaveBalanceRepository.findByEmployeeIdAndLeaveTypeIdAndYear(EMPLOYEE_ID, LEAVE_TYPE_ID, YEAR))
+                .thenReturn(Optional.of(balance));
+
+        leaveApplicationService.sanction(APPLICATION_ID, null, null);
+
+        org.mockito.ArgumentCaptor<in.gov.jci.hrms.entity.LeaveApplicationAction> captor =
+                org.mockito.ArgumentCaptor.forClass(in.gov.jci.hrms.entity.LeaveApplicationAction.class);
+        org.mockito.Mockito.verify(leaveApplicationActionRepository).save(captor.capture());
+        assertThat(captor.getValue().getActionBy().getId()).isEqualTo(20L);
+    }
+
+    @Test
+    void rejectWithRemarks_whenRemarksBlank_throwsBusinessRuleViolationExceptionWithoutLoadingApplication() {
+        assertThatThrownBy(() -> leaveApplicationService.rejectWithRemarks(APPLICATION_ID, "  ", 20L))
+                .isInstanceOf(BusinessRuleViolationException.class)
+                .hasMessageContaining("Remarks are mandatory");
+
+        org.mockito.Mockito.verifyNoInteractions(leaveApplicationRepository);
+    }
+
+    @Test
+    void rejectWithRemarks_withRemarks_releasesReservationAndLogsRejectAction() {
+        LeaveApplication application = applicationFrom(APPLICATION_ID, validRequest());
+        application.setStatus(LeaveApplicationStatus.PENDING_APPROVAL);
+        LeaveBalance balance = balanceOf(new BigDecimal("30.0"), new BigDecimal("2.0"), new BigDecimal("3.0"));
+        Employee actor = employeeWithId(20L, "EMP-020", "Ravi");
+
+        when(leaveApplicationRepository.findById(APPLICATION_ID)).thenReturn(Optional.of(application));
+        when(leaveBalanceRepository.findByEmployeeIdAndLeaveTypeIdAndYear(EMPLOYEE_ID, LEAVE_TYPE_ID, YEAR))
+                .thenReturn(Optional.of(balance));
+        when(employeeRepository.findById(20L)).thenReturn(Optional.of(actor));
+
+        LeaveApplicationResponse response = leaveApplicationService.rejectWithRemarks(APPLICATION_ID, "Not eligible", 20L);
+
+        assertThat(response.status()).isEqualTo(LeaveApplicationStatus.REJECTED);
+        assertThat(response.workflowStage()).isEqualTo(in.gov.jci.hrms.entity.LeaveWorkflowStage.REJECTED);
+        assertThat(balance.getReservedDays()).isEqualByComparingTo("0.0");
+
+        org.mockito.ArgumentCaptor<in.gov.jci.hrms.entity.LeaveApplicationAction> captor =
+                org.mockito.ArgumentCaptor.forClass(in.gov.jci.hrms.entity.LeaveApplicationAction.class);
+        org.mockito.Mockito.verify(leaveApplicationActionRepository).save(captor.capture());
+        assertThat(captor.getValue().getActionType()).isEqualTo(in.gov.jci.hrms.entity.LeaveActionType.REJECT);
+        assertThat(captor.getValue().getRemarks()).isEqualTo("Not eligible");
+    }
+
+    @Test
+    void getRoutingHistory_mapsActionsInChronologicalOrder() {
+        LeaveApplication application = applicationFrom(APPLICATION_ID, validRequest());
+        Employee submitter = employee;
+        Employee approver = employeeWithId(20L, "EMP-020", "Ravi");
+
+        in.gov.jci.hrms.entity.LeaveApplicationAction submit = new in.gov.jci.hrms.entity.LeaveApplicationAction(
+                application, submitter, in.gov.jci.hrms.entity.LeaveActionType.SUBMIT, null, null);
+        in.gov.jci.hrms.entity.LeaveApplicationAction sanction = new in.gov.jci.hrms.entity.LeaveApplicationAction(
+                application, approver, in.gov.jci.hrms.entity.LeaveActionType.SANCTION, null, "Approved");
+
+        when(leaveApplicationRepository.findById(APPLICATION_ID)).thenReturn(Optional.of(application));
+        when(leaveApplicationActionRepository.findByApplicationIdOrderByCreatedAtAsc(APPLICATION_ID))
+                .thenReturn(java.util.List.of(submit, sanction));
+
+        java.util.List<in.gov.jci.hrms.dto.LeaveRoutingActionResponse> history =
+                leaveApplicationService.getRoutingHistory(APPLICATION_ID);
+
+        assertThat(history).hasSize(2);
+        assertThat(history.get(0).actionType()).isEqualTo(in.gov.jci.hrms.entity.LeaveActionType.SUBMIT);
+        assertThat(history.get(1).actionType()).isEqualTo(in.gov.jci.hrms.entity.LeaveActionType.SANCTION);
+        assertThat(history.get(1).actionByName()).isEqualTo(approver.getFullName());
+        assertThat(history.get(1).remarks()).isEqualTo("Approved");
+    }
+
+    @Test
+    void getRoutingHistory_whenApplicationMissing_throwsMasterDataNotFoundException() {
+        when(leaveApplicationRepository.findById(APPLICATION_ID)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> leaveApplicationService.getRoutingHistory(APPLICATION_ID))
+                .isInstanceOf(MasterDataNotFoundException.class);
+    }
+
+    @Test
+    void getSanctionsHistory_filtersByYearMonthAndStatus() {
+        LeaveApplication inMonthApproved = applicationFrom(1L, validRequest());
+        inMonthApproved.setStatus(LeaveApplicationStatus.APPROVED);
+        ReflectionTestUtils.setField(inMonthApproved, "updatedAt", java.time.Instant.parse("2026-03-15T10:00:00Z"));
+
+        LeaveApplication inMonthRejected = applicationFrom(2L, validRequest());
+        inMonthRejected.setStatus(LeaveApplicationStatus.REJECTED);
+        ReflectionTestUtils.setField(inMonthRejected, "updatedAt", java.time.Instant.parse("2026-03-20T10:00:00Z"));
+
+        LeaveApplication outOfMonth = applicationFrom(3L, validRequest());
+        outOfMonth.setStatus(LeaveApplicationStatus.APPROVED);
+        ReflectionTestUtils.setField(outOfMonth, "updatedAt", java.time.Instant.parse("2026-04-01T10:00:00Z"));
+
+        LeaveApplication stillPending = applicationFrom(4L, validRequest());
+        stillPending.setStatus(LeaveApplicationStatus.PENDING_APPROVAL);
+        ReflectionTestUtils.setField(stillPending, "updatedAt", java.time.Instant.parse("2026-03-16T10:00:00Z"));
+
+        when(leaveApplicationRepository.findAll())
+                .thenReturn(java.util.List.of(inMonthApproved, inMonthRejected, outOfMonth, stillPending));
+        when(leaveApplicationActionRepository.findByApplicationIdOrderByCreatedAtAsc(org.mockito.ArgumentMatchers.anyLong()))
+                .thenReturn(java.util.List.of());
+
+        java.util.List<in.gov.jci.hrms.dto.LeaveSanctionHistoryResponse> approvedOnly =
+                leaveApplicationService.getSanctionsHistory(YEAR, 3, "APPROVED");
+        assertThat(approvedOnly).extracting(in.gov.jci.hrms.dto.LeaveSanctionHistoryResponse::id).containsExactly(1L);
+
+        java.util.List<in.gov.jci.hrms.dto.LeaveSanctionHistoryResponse> wholeMonthAllStatuses =
+                leaveApplicationService.getSanctionsHistory(YEAR, 3, null);
+        assertThat(wholeMonthAllStatuses).extracting(in.gov.jci.hrms.dto.LeaveSanctionHistoryResponse::id)
+                .containsExactlyInAnyOrder(1L, 2L);
+    }
+
+    @Test
+    void getSanctionsHistory_derivesForwardedByAndSanctionedByFromActionLog() {
+        LeaveApplication application = applicationFrom(1L, validRequest());
+        application.setStatus(LeaveApplicationStatus.APPROVED);
+        ReflectionTestUtils.setField(application, "updatedAt", java.time.Instant.parse("2026-03-15T10:00:00Z"));
+
+        Employee forwarder = employeeWithId(20L, "EMP-020", "Ravi");
+        Employee sanctioner = employeeWithId(30L, "EMP-030", "Meena");
+        in.gov.jci.hrms.entity.LeaveApplicationAction forwardAction = new in.gov.jci.hrms.entity.LeaveApplicationAction(
+                application, forwarder, in.gov.jci.hrms.entity.LeaveActionType.RECOMMEND_FORWARD, sanctioner, "fwd");
+        in.gov.jci.hrms.entity.LeaveApplicationAction sanctionAction = new in.gov.jci.hrms.entity.LeaveApplicationAction(
+                application, sanctioner, in.gov.jci.hrms.entity.LeaveActionType.SANCTION, null, "ok");
+
+        when(leaveApplicationRepository.findAll()).thenReturn(java.util.List.of(application));
+        when(leaveApplicationActionRepository.findByApplicationIdOrderByCreatedAtAsc(1L))
+                .thenReturn(java.util.List.of(forwardAction, sanctionAction));
+
+        java.util.List<in.gov.jci.hrms.dto.LeaveSanctionHistoryResponse> history =
+                leaveApplicationService.getSanctionsHistory(YEAR, 3, null);
+
+        assertThat(history).hasSize(1);
+        assertThat(history.get(0).forwardedByName()).isEqualTo(forwarder.getFullName());
+        assertThat(history.get(0).sanctionedByName()).isEqualTo(sanctioner.getFullName());
     }
 }

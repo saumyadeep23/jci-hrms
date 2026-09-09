@@ -44,6 +44,7 @@ public class EmployeeDependentService {
         EmployeeDependent dependent = new EmployeeDependent(
                 resolveEmployee(employeeId), request.name(), request.relationship(), request.isDependent(), request.isCoveredMedical());
         dependent.setDateOfBirth(request.dateOfBirth());
+        applyDivyangAndBirthFields(dependent, request);
         DependentResponse saved = DependentResponse.from(dependentRepository.saveAndFlush(dependent));
         syncDependentCount(employeeId);
         return saved;
@@ -57,7 +58,15 @@ public class EmployeeDependentService {
         dependent.setDateOfBirth(request.dateOfBirth());
         dependent.setDependent(request.isDependent());
         dependent.setCoveredMedical(request.isCoveredMedical());
+        applyDivyangAndBirthFields(dependent, request);
         return DependentResponse.from(dependentRepository.saveAndFlush(dependent));
+    }
+
+    private void applyDivyangAndBirthFields(EmployeeDependent dependent, DependentRequest request) {
+        dependent.setGender(request.gender());
+        dependent.setDivyang(request.isDivyang());
+        dependent.setDisabilityPercentage(request.disabilityPercentage());
+        dependent.setMultipleBirthSecondDelivery(request.isMultipleBirthSecondDelivery());
     }
 
     @Transactional

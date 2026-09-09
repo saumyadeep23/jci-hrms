@@ -3,6 +3,7 @@ import { History } from 'lucide-react'
 import { apiClient } from '../../api/client'
 import { useAuth } from '../../auth/AuthContext'
 import { formatDate } from '../../lib/date'
+import { serviceBookEventTitle } from '../../lib/serviceBookEvent'
 import { Badge, Card, EmptyState, ErrorState, LoadingState, PageHeader } from '../../components/common/ui'
 import type { ServiceBookEventResponse } from '../../types/api'
 
@@ -49,13 +50,19 @@ export function ServiceBookPage() {
               </span>
               <Card>
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <Badge tone={eventTone(event.eventType)}>{event.eventType.replace(/_/g, ' ')}</Badge>
+                  <Badge tone={eventTone(event.eventType)}>{serviceBookEventTitle(event)}</Badge>
                   <div className="flex items-center gap-2">
                     {event.isMigrated && <Badge tone="neutral">Migrated</Badge>}
                     <span className="text-xs text-slate-400">{formatDate(event.eventDate)}</span>
                   </div>
                 </div>
-                {event.eventDescription && <p className="mt-1 text-sm text-slate-600">{event.eventDescription}</p>}
+                {/* The full narrative in remarks (e.g. the EL encashment sanction breakdown) supersedes the
+                    generic eventDescription placeholder ("Leave Account / Encashments") when both are present. */}
+                {event.remarks ? (
+                  <p className="mt-1 text-sm text-slate-600">{event.remarks}</p>
+                ) : (
+                  event.eventDescription && <p className="mt-1 text-sm text-slate-600">{event.eventDescription}</p>
+                )}
                 <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-500 sm:grid-cols-4">
                   {event.orderNumber && (
                     <div>

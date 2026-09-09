@@ -77,8 +77,9 @@ function parseCsv(text: string): CsvRow[] {
       const enjoyable = Number(openingEnjoyableEl)
       const total = Number(openingBalance)
       if (!Number.isNaN(encashable) && !Number.isNaN(enjoyable) && !Number.isNaN(total)) {
-        if (Math.abs(encashable - enjoyable) > 0.01) problems.push('EL split is not 50:50')
+        if (encashable < 0 || enjoyable < 0) problems.push('Encashable/Enjoyable must be non-negative')
         if (Math.abs(encashable + enjoyable - total) > 0.01) problems.push('Encashable + Enjoyable != openingBalance')
+        if (encashable > 300) problems.push('Encashable EL exceeds the 300-day statutory encashment cap')
       }
       if (!Number.isNaN(total) && total > 300) problems.push('EL opening balance exceeds 300-day cap')
     }
@@ -199,7 +200,10 @@ export function LeaveBaselineTakeOnPage() {
     elRow.openingBalance.trim() === '' ||
     (isTwoDecimal(elRow.openingEncashableEl || '0') &&
       isTwoDecimal(elRow.openingEnjoyableEl || '0') &&
+      Number(elRow.openingEncashableEl || 0) >= 0 &&
+      Number(elRow.openingEnjoyableEl || 0) >= 0 &&
       Math.abs(Number(elRow.openingEncashableEl || 0) + Number(elRow.openingEnjoyableEl || 0) - Number(elRow.openingBalance || 0)) < 0.01 &&
+      Number(elRow.openingEncashableEl || 0) <= 300 &&
       Number(elRow.openingBalance || 0) <= 300)
 
   const anyRowFilled = (rows ?? []).some((r) => r.openingBalance.trim() !== '')
@@ -473,7 +477,8 @@ export function LeaveBaselineTakeOnPage() {
             </table>
             {elRow && elRow.openingBalance.trim() !== '' && !elSplitValid && (
               <p className="mt-2 text-xs font-medium text-red-600">
-                EL: Encashable + Enjoyable must equal the total, and the total must not exceed 300.00 days.
+                EL: Encashable and Enjoyable must each be non-negative, must sum to the total, Encashable must not
+                exceed 300.00 days (statutory cap), and the total must not exceed 300.00 days.
               </p>
             )}
           </div>

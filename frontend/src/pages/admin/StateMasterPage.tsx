@@ -2,13 +2,22 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Pencil, Plus } from 'lucide-react'
 import { apiClient } from '../../api/client'
-import { describeApiError } from '../../lib/apiError'
+import { describeApiError, getFieldErrors } from '../../lib/apiError'
 import { Modal } from '../../components/common/Modal'
 import { useToast } from '../../components/common/ToastProvider'
-import { Badge, Card, EmptyState, ErrorState, LoadingState, PageHeader, PrimaryButton } from '../../components/common/ui'
+import { Badge, Card, EmptyState, ErrorState, FieldError, LoadingState, PageHeader, PrimaryButton, errorInputClass } from '../../components/common/ui'
 import type { Page, StateMasterRequest, StateMasterResponse, StateType } from '../../types/api'
 
-const EMPTY_FORM = { stateCode: '', stateName: '', stateType: 'STATE' as StateType, active: true }
+const DEFAULT_REMOTE_ALLOWANCE_PERCENTAGE = 10.0
+
+const EMPTY_FORM = {
+  stateCode: '',
+  stateName: '',
+  stateType: 'STATE' as StateType,
+  active: true,
+  isRemoteArea: false,
+  remoteAllowancePercentage: 0,
+}
 
 const STATE_TYPE_LABELS: Record<StateType, string> = {
   STATE: 'State',
@@ -43,6 +52,7 @@ export function StateMasterPage() {
       closeModal()
     },
   })
+  const fieldErrors = getFieldErrors(saveMutation.error)
 
   function openCreate() {
     setEditing(null)
@@ -52,7 +62,14 @@ export function StateMasterPage() {
 
   function openEdit(state: StateMasterResponse) {
     setEditing(state)
-    setForm({ stateCode: state.stateCode, stateName: state.stateName, stateType: state.stateType, active: state.active })
+    setForm({
+      stateCode: state.stateCode,
+      stateName: state.stateName,
+      stateType: state.stateType,
+      active: state.active,
+      isRemoteArea: state.isRemoteArea,
+      remoteAllowancePercentage: state.remoteAllowancePercentage,
+    })
     setModalOpen(true)
   }
 
@@ -61,6 +78,19 @@ export function StateMasterPage() {
     setEditing(null)
     setForm(EMPTY_FORM)
   }
+
+  /** Toggle ON pre-fills 10.00% (per spec); toggle OFF resets to 0.00 - the only value the backend accepts when isRemoteArea is false. */
+  function toggleRemoteArea(checked: boolean) {
+    setForm({
+      ...form,
+      isRemoteArea: checked,
+      remoteAllowancePercentage: checked ? DEFAULT_REMOTE_ALLOWANCE_PERCENTAGE : 0,
+    })
+  }
+
+  const remoteAllowanceInvalid = form.isRemoteArea && (form.remoteAllowancePercentage <= 0 || form.remoteAllowancePercentage > 100)
+  const formValid =
+    form.stateCode.trim().length >= 2 && form.stateCode.trim().length <= 10 && form.stateName.trim() !== '' && !remoteAllowanceInvalid
 
   return (
     <div>
@@ -87,6 +117,7 @@ export function StateMasterPage() {
                   <th className="py-2 pr-3">Code</th>
                   <th className="py-2 pr-3">Name</th>
                   <th className="py-2 pr-3">Type</th>
+                  <th className="py-2 pr-3">Remote Area</th>
                   <th className="py-2 pr-3">Status</th>
                   <th className="py-2 pl-3 text-right">Actions</th>
                 </tr>
@@ -97,6 +128,11 @@ export function StateMasterPage() {
                     <td className="py-2 pr-3 font-medium">{state.stateCode}</td>
                     <td className="py-2 pr-3">{state.stateName}</td>
                     <td className="py-2 pr-3 text-slate-500">{STATE_TYPE_LABELS[state.stateType]}</td>
+                    <td className="py-2 pr-3">
+                      <Badge tone={state.isRemoteArea ? 'brand' : 'neutral'}>
+                        {state.isRemoteArea ? `Yes (${state.remoteAllowancePercentage.toFixed(2)}%)` : 'No'}
+                      </Badge>
+                    </td>
                     <td className="py-2 pr-3">
                       <Badge tone={state.active ? 'success' : 'neutral'}>{state.active ? 'Active' : 'Inactive'}</Badge>
                     </td>
@@ -131,12 +167,14 @@ export function StateMasterPage() {
               <label className="mb-1 block text-xs font-medium text-slate-600">State Code</label>
               <input
                 required
+                minLength={2}
                 maxLength={10}
                 value={form.stateCode}
                 onChange={(e) => setForm({ ...form, stateCode: e.target.value.toUpperCase() })}
-                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                className={`w-full rounded-md border border-slate-300 px-3 py-2 text-sm uppercase ${errorInputClass(Boolean(fieldErrors?.stateCode))}`}
                 placeholder="WB"
               />
+              <FieldError message={fieldErrors?.stateCode} />
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-slate-600">State Name</label>
@@ -160,7 +198,42 @@ export function StateMasterPage() {
                 <option value="NATIONAL_CAPITAL_TERRITORY">National Capital Territory</option>
               </select>
             </div>
-            <PrimaryButton type="submit" disabled={saveMutation.isPending} className="w-full justify-center">
+
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} />
+              Active
+            </label>
+
+            <div className="rounded-md border border-slate-200 p-3">
+              <label className="flex items-center justify-between text-sm text-slate-700">
+                <span>Remote Area Allowance Applicable</span>
+                <input
+                  type="checkbox"
+                  role="switch"
+                  checked={form.isRemoteArea}
+                  onChange={(e) => toggleRemoteArea(e.target.checked)}
+                />
+              </label>
+              {form.isRemoteArea && (
+                <div className="mt-3">
+                  <label className="mb-1 block text-xs font-medium text-slate-600">Allowance %</label>
+                  <input
+                    required
+                    type="number"
+                    min={0.01}
+                    max={100}
+                    step={0.5}
+                    value={form.remoteAllowancePercentage}
+                    onChange={(e) => setForm({ ...form, remoteAllowancePercentage: Number(e.target.value) })}
+                    className={`w-full rounded-md border border-slate-300 px-3 py-2 text-sm ${errorInputClass(remoteAllowanceInvalid || Boolean(fieldErrors?.remoteAllowancePercentage))}`}
+                  />
+                  {remoteAllowanceInvalid && <p className="mt-1 text-xs text-rose-600">Must be greater than 0 and at most 100.</p>}
+                  <FieldError message={fieldErrors?.remoteAllowancePercentage} />
+                </div>
+              )}
+            </div>
+
+            <PrimaryButton type="submit" disabled={saveMutation.isPending || !formValid} className="w-full justify-center">
               Save State
             </PrimaryButton>
             {saveMutation.isError && (

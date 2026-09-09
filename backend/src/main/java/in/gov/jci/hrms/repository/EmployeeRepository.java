@@ -1,6 +1,7 @@
 package in.gov.jci.hrms.repository;
 
 import in.gov.jci.hrms.entity.Employee;
+import in.gov.jci.hrms.entity.EmployeeStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
@@ -10,6 +11,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.lang.NonNull;
 
+import java.util.List;
 import java.util.Optional;
 
 public interface EmployeeRepository extends JpaRepository<Employee, Long>, JpaSpecificationExecutor<Employee> {
@@ -20,16 +22,16 @@ public interface EmployeeRepository extends JpaRepository<Employee, Long>, JpaSp
      * association per row (N+1) when building the response.
      */
     @Override
-    @EntityGraph(attributePaths = {"department", "designation", "regionalOffice", "departmentalPurchaseCentre", "payScale"})
+    @EntityGraph(attributePaths = {"department", "designation", "regionalOffice", "departmentalPurchaseCentre"})
     Optional<Employee> findById(Long id);
 
     @Override
-    @EntityGraph(attributePaths = {"department", "designation", "regionalOffice", "departmentalPurchaseCentre", "payScale"})
+    @EntityGraph(attributePaths = {"department", "designation", "regionalOffice", "departmentalPurchaseCentre"})
     Page<Employee> findAll(Pageable pageable);
 
     /** Employee Directory's filtered/paged listing (EmployeeSpecification) - same eager-fetch treatment as the plain findAll(Pageable) above. */
     @Override
-    @EntityGraph(attributePaths = {"department", "designation", "regionalOffice", "departmentalPurchaseCentre", "payScale"})
+    @EntityGraph(attributePaths = {"department", "designation", "regionalOffice", "departmentalPurchaseCentre"})
     Page<Employee> findAll(@NonNull Specification<Employee> spec, @NonNull Pageable pageable);
 
     Optional<Employee> findByEmployeeCode(String employeeCode);
@@ -40,11 +42,17 @@ public interface EmployeeRepository extends JpaRepository<Employee, Long>, JpaSp
 
     boolean existsByDepartmentalPurchaseCentreId(Long dpcId);
 
-    boolean existsByPayScaleId(Long payScaleId);
-
     boolean existsByDepartmentId(Long departmentId);
 
     boolean existsByDesignationId(Long designationId);
+
+    /** NPS Declaration Desk's HR admin "Pending / Not Submitted" tab - every active, NPS-eligible employee, before filtering out who already declared for the selected FY. */
+    @EntityGraph(attributePaths = {"regionalOffice", "departmentalPurchaseCentre"})
+    List<Employee> findByNpsEligibleTrueAndStatus(EmployeeStatus status);
+
+    /** PayrollBatchComputationService.processBatch()'s "active employees eligible for payroll" source set - see its javadoc for why status alone (plus a current RegularPayFixation, checked per-employee) is the eligibility gate. */
+    @EntityGraph(attributePaths = {"regionalOffice", "designation", "department"})
+    List<Employee> findByStatus(EmployeeStatus status);
 
     /**
      * PIMS_SPEC.md Feature 1's exact "current highest numeric employee_code

@@ -5,7 +5,6 @@ import in.gov.jci.hrms.dto.PayScaleResponse;
 import in.gov.jci.hrms.entity.PayScale;
 import in.gov.jci.hrms.entity.ScaleType;
 import in.gov.jci.hrms.exception.MasterDataConflictException;
-import in.gov.jci.hrms.exception.MasterDataInUseException;
 import in.gov.jci.hrms.exception.MasterDataValidationException;
 import in.gov.jci.hrms.repository.PayScaleRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -85,23 +84,15 @@ class PayScaleServiceTest {
                 .isInstanceOf(MasterDataConflictException.class);
     }
 
-    @Test
-    void delete_whenReferencedByActiveEmployee_throwsMasterDataInUseException() {
-        PayScale payScale = entityFrom(2L, validRequest());
-        when(payScaleRepository.findById(2L)).thenReturn(java.util.Optional.of(payScale));
-        when(jdbcTemplate.queryForObject(any(String.class), org.mockito.ArgumentMatchers.eq(Long.class), any(Object.class)))
-                .thenReturn(1L);
-
-        assertThatThrownBy(() -> payScaleService.delete(2L))
-                .isInstanceOf(MasterDataInUseException.class);
-    }
+    // delete_whenReferencedByActiveEmployee_throwsMasterDataInUseException removed (V60):
+    // DEPENDENCY_PROBES is now empty - both columns it used to probe (employees.pay_scale_id,
+    // employee_employment_categories.pay_scale_id) were dropped, so MasterDependencyService.check()
+    // can never find an active dependency anymore. See PayScaleService's own javadoc.
 
     @Test
     void delete_whenNotReferenced_softDeletesAndDeactivates() {
         PayScale payScale = entityFrom(3L, validRequest());
         when(payScaleRepository.findById(3L)).thenReturn(java.util.Optional.of(payScale));
-        when(jdbcTemplate.queryForObject(any(String.class), org.mockito.ArgumentMatchers.eq(Long.class), any(Object.class)))
-                .thenReturn(0L);
 
         payScaleService.delete(3L);
 

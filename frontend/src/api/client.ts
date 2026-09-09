@@ -3,8 +3,15 @@ import { notifyToast } from '../lib/toastBridge'
 
 const TOKEN_STORAGE_KEY = 'jci-hrms-token'
 
+// Derived from whatever host/protocol this page was itself loaded from, rather than a hardcoded
+// "localhost" - that broke entirely for a phone on the LAN (its own "localhost" is the phone, not the
+// dev machine serving the frontend). The backend is always dev-server-port 8080 on that same host, and
+// same protocol as the page (SecurityConfig's CORS origins are HTTPS-only for a non-localhost host, since
+// an HTTPS page calling an HTTP API gets blocked as mixed content anyway).
+const API_BASE_URL = `${window.location.protocol}//${window.location.hostname}:8080/api`
+
 export const apiClient = axios.create({
-  baseURL: 'http://localhost:8080/api',
+  baseURL: API_BASE_URL,
   // Matches SecurityConfig.corsConfigurationSource() on the backend, which
   // sets Access-Control-Allow-Credentials: true for the allowed dev origins.
   withCredentials: true,

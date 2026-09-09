@@ -35,12 +35,16 @@ export function LeaveBalanceSplitCard({ year }: { year: number }) {
   const hpl = balancesQuery.data?.find((b) => b.leaveTypeCode === 'HPL')
   const cl = balancesQuery.data?.find((b) => b.leaveTypeCode === 'CL')
   const rh = balancesQuery.data?.find((b) => b.leaveTypeCode === 'RH')
+  // Computed from the split rather than trusted from el.availableBalance directly - the two are
+  // supposed to always agree, but deriving the total this way means a display never contradicts
+  // itself even if a future write path ever lets them drift again.
+  const totalElAvailable = el ? Number(el.encashableAvailable || 0) + Number(el.enjoyableAvailable || 0) : null
 
   return (
     <Card>
       <h2 className="mb-3 text-sm font-semibold text-slate-700">Leave Balance Summary</h2>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <Chip label="Total EL" value={el ? el.availableBalance.toFixed(2) : '—'} tone="brand" />
+        <Chip label="Total EL" value={totalElAvailable !== null ? totalElAvailable.toFixed(2) : '—'} tone="brand" />
         <Chip label="Encashable EL" value={el ? el.encashableAvailable.toFixed(2) : '—'} tone="success" />
         <Chip label="Enjoyable EL" value={el ? el.enjoyableAvailable.toFixed(2) : '—'} tone="neutral" />
         <Chip label="HPL" value={hpl ? hpl.availableDays.toFixed(1) : '—'} tone="neutral" />

@@ -26,6 +26,11 @@ public class LeaveApplicationSecurity {
         return matches(authentication, leaveApplicationId, LeaveApplication::getApproverEmployee);
     }
 
+    /** currentAssignedTo moves with every forward() - the multi-tier routing counterpart of isApprover() above, which never changes after submit(). */
+    public boolean isCurrentAssignee(Authentication authentication, Long leaveApplicationId) {
+        return matches(authentication, leaveApplicationId, LeaveApplication::getCurrentAssignedTo);
+    }
+
     private boolean matches(Authentication authentication, Long leaveApplicationId,
                              Function<LeaveApplication, Employee> role) {
         Long callerEmployeeId = SecurityUtils.currentEmployeeId(authentication);

@@ -162,4 +162,44 @@ class HolidayServiceTest {
         assertThat(response.upcomingHolidayName()).isEqualTo("Republic Day");
         assertThat(response.upcomingHolidayDate()).isEqualTo(today.plusDays(10));
     }
+
+    @Test
+    void getMyRestrictedHolidays_scopesToOwnStateAndExcludesOtherStatesAndGazetted() {
+        RegionalOffice ro = new RegionalOffice("RO-WB", "Kolkata RO", "West Bengal", CityClass.X, true);
+        Employee employee = employeeAt(ro, null);
+        when(employeeRepository.findById(EMPLOYEE_ID)).thenReturn(Optional.of(employee));
+
+        // The same festival published as a separate RESTRICTED row per state (V39: multi-state) - a
+        // naive unscoped fetch would surface all of these to every employee regardless of location.
+        Holiday wbRow = new Holiday(LocalDate.of(2026, 9, 14), "Ganesh Chaturthi", HolidayType.RESTRICTED, "West Bengal");
+        Holiday maharashtraRow = new Holiday(LocalDate.of(2026, 9, 14), "Ganesh Chaturthi", HolidayType.RESTRICTED, "Maharashtra");
+        Holiday karnatakaRow = new Holiday(LocalDate.of(2026, 9, 14), "Ganesh Chaturthi", HolidayType.RESTRICTED, "Karnataka");
+        Holiday nationalGazetted = new Holiday(LocalDate.of(2026, 1, 26), "Republic Day", HolidayType.GAZETTED, null);
+        Holiday nationalRh = new Holiday(LocalDate.of(2026, 12, 24), "Christmas Eve RH", HolidayType.RESTRICTED, null);
+        when(holidayRepository.findByHolidayDateBetween(LocalDate.of(2026, 1, 1), LocalDate.of(2026, 12, 31)))
+                .thenReturn(List.of(wbRow, maharashtraRow, karnatakaRow, nationalGazetted, nationalRh));
+
+        List<HolidayResponse> result = holidayService.getMyRestrictedHolidays(EMPLOYEE_ID, 2026);
+
+        assertThat(result).extracting(HolidayResponse::name)
+                .containsExactlyInAnyOrder("Ganesh Chaturthi", "Christmas Eve RH")
+                .doesNotContain("Republic Day"); // GAZETTED, not RESTRICTED
+        assertThat(result).hasSize(2); // only the WB row of the three same-named RESTRICTED rows, plus the national one
+    }
+
+    @Test
+    void getMyRestrictedHolidays_dedupesTrueDuplicateSameStateSameDateRows() {
+        RegionalOffice ro = new RegionalOffice("RO-WB", "Kolkata RO", "West Bengal", CityClass.X, true);
+        Employee employee = employeeAt(ro, null);
+        when(employeeRepository.findById(EMPLOYEE_ID)).thenReturn(Optional.of(employee));
+
+        Holiday first = new Holiday(LocalDate.of(2026, 9, 14), "Ganesh Chaturthi", HolidayType.RESTRICTED, "West Bengal");
+        Holiday accidentalDuplicate = new Holiday(LocalDate.of(2026, 9, 14), "Ganesh Chaturthi", HolidayType.RESTRICTED, "West Bengal");
+        when(holidayRepository.findByHolidayDateBetween(LocalDate.of(2026, 1, 1), LocalDate.of(2026, 12, 31)))
+                .thenReturn(List.of(first, accidentalDuplicate));
+
+        List<HolidayResponse> result = holidayService.getMyRestrictedHolidays(EMPLOYEE_ID, 2026);
+
+        assertThat(result).hasSize(1);
+    }
 }

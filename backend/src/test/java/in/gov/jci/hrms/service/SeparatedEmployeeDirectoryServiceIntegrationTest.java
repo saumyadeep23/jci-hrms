@@ -43,4 +43,27 @@ class SeparatedEmployeeDirectoryServiceIntegrationTest {
 
         assertThat(page.getContent()).extracting(SeparatedEmployeeResponse::id).doesNotContain(101L);
     }
+
+    /**
+     * Regression for the exact bug SeparatedStaffTab.tsx hit: it sends
+     * status="SEPARATED" as a meta-keyword (matching the EmployeeSpecification
+     * convention on the sibling /api/employees endpoint's directory filter),
+     * but this service's SQL originally did a literal e.status = 'SEPARATED'
+     * equality check - no employee ever has that literal status, so both the
+     * count and data queries always returned zero rows and the tab rendered
+     * empty regardless of what was actually in the database.
+     */
+    @Test
+    void list_statusFilterSeparated_isTreatedAsNoOpKeyword_notLiteralStatusValue() {
+        var page = separatedEmployeeDirectoryService.list("SEPARATED", null, PageRequest.of(0, 500));
+
+        assertThat(page.getContent()).extracting(SeparatedEmployeeResponse::id).contains(101L);
+    }
+
+    @Test
+    void list_statusFilterAll_isTreatedAsNoOpKeyword() {
+        var page = separatedEmployeeDirectoryService.list("ALL", null, PageRequest.of(0, 500));
+
+        assertThat(page.getContent()).extracting(SeparatedEmployeeResponse::id).contains(101L);
+    }
 }

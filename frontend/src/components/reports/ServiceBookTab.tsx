@@ -4,11 +4,12 @@ import { Plus } from 'lucide-react'
 import { apiClient } from '../../api/client'
 import { describeApiErrorList, getFieldErrors } from '../../lib/apiError'
 import { formatDate } from '../../lib/date'
+import { serviceBookEventTitle } from '../../lib/serviceBookEvent'
 import { Modal } from '../common/Modal'
 import { FormErrorBanner } from '../common/FormErrorBanner'
 import { EmptyState, ErrorState, FieldError, LoadingState, PrimaryButton, SecondaryButton, errorInputClass } from '../common/ui'
 import { DepartmentFilter } from './DepartmentFilter'
-import type { CareerEventType, DesignationResponse, Page, PayScaleResponse, RegionalOfficeResponse, ServiceBookEventRequest, ServiceBookEventResponse } from '../../types/api'
+import type { CareerEventType, DesignationResponse, GradeScaleMasterResponse, Page, RegionalOfficeResponse, ServiceBookEventRequest, ServiceBookEventResponse } from '../../types/api'
 
 const EVENT_TYPES: CareerEventType[] = ['PROMOTION', 'TRANSFER', 'MACP', 'PAY_REVISION', 'PENALTY_WITHHOLD_INCREMENT', 'PENALTY_CENSUROUS', 'EOL_LWP']
 
@@ -20,7 +21,7 @@ const EMPTY_FORM = {
   departmentId: '',
   designationId: '',
   regionalOfficeId: '',
-  payScaleId: '',
+  gradeScaleId: '',
   basicPay: '',
   remarks: '',
 }
@@ -46,9 +47,9 @@ export function ServiceBookTab({ employeeId }: { employeeId: number }) {
     queryFn: async () => (await apiClient.get<Page<RegionalOfficeResponse>>('/regional-offices', { params: { size: 200 } })).data.content,
     enabled: modalOpen,
   })
-  const payScalesQuery = useQuery({
-    queryKey: ['pay-scales-all'],
-    queryFn: async () => (await apiClient.get<Page<PayScaleResponse>>('/pay-scales', { params: { size: 200 } })).data.content,
+  const gradeScalesQuery = useQuery({
+    queryKey: ['grade-scales-all'],
+    queryFn: async () => (await apiClient.get<GradeScaleMasterResponse[]>('/v1/masters/grade-scales')).data,
     enabled: modalOpen,
   })
 
@@ -62,7 +63,7 @@ export function ServiceBookTab({ employeeId }: { employeeId: number }) {
         departmentId: form.departmentId ? Number(form.departmentId) : null,
         designationId: form.designationId ? Number(form.designationId) : null,
         regionalOfficeId: form.regionalOfficeId ? Number(form.regionalOfficeId) : null,
-        payScaleId: form.payScaleId ? Number(form.payScaleId) : null,
+        gradeScaleId: form.gradeScaleId ? Number(form.gradeScaleId) : null,
         basicPay: form.basicPay ? Number(form.basicPay) : null,
         remarks: form.remarks || null,
       }
@@ -92,13 +93,18 @@ export function ServiceBookTab({ employeeId }: { employeeId: number }) {
           {data.map((event) => (
             <li key={event.id} className="rounded-md border border-slate-200 p-3 text-sm">
               <div className="flex items-center justify-between">
-                <span className="font-medium text-slate-700">{event.eventType.replace(/_/g, ' ')}</span>
+                <span className="font-medium text-slate-700">{serviceBookEventTitle(event)}</span>
                 <span className="text-xs text-slate-400">{formatDate(event.eventDate)}</span>
               </div>
-              <p className="mt-1 text-xs text-slate-500">
-                {[event.designationTitle, event.departmentName, event.regionalOfficeName].filter(Boolean).join(' / ') || 'No org change recorded'}
-                {event.basicPay != null && ` - Basic: ${event.basicPay.toLocaleString('en-IN')}`}
-              </p>
+              {/* "No org change recorded" is meaningless noise on an event (like EL encashment) that never
+                  touches org fields and already has its own structured narrative in remarks below - but a
+                  real org change still gets its summary line even when remarks also happens to be set. */}
+              {(event.designationTitle || event.departmentName || event.regionalOfficeName || !event.remarks) && (
+                <p className="mt-1 text-xs text-slate-500">
+                  {[event.designationTitle, event.departmentName, event.regionalOfficeName].filter(Boolean).join(' / ') || 'No org change recorded'}
+                  {event.basicPay != null && ` - Basic: ${event.basicPay.toLocaleString('en-IN')}`}
+                </p>
+              )}
               {event.orderNumber && (
                 <p className="text-xs text-slate-400">
                   Order: {event.orderNumber} {event.orderDate && `dated ${formatDate(event.orderDate)}`}
@@ -201,16 +207,16 @@ export function ServiceBookTab({ employeeId }: { employeeId: number }) {
                 </select>
               </div>
               <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Pay Scale</label>
+                <label className="mb-1 block text-xs font-medium text-slate-600">Grade Scale</label>
                 <select
-                  value={form.payScaleId}
-                  onChange={(e) => setForm({ ...form, payScaleId: e.target.value })}
+                  value={form.gradeScaleId}
+                  onChange={(e) => setForm({ ...form, gradeScaleId: e.target.value })}
                   className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
                 >
                   <option value="">Unchanged</option>
-                  {(payScalesQuery.data ?? []).map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.grade} ({p.scaleType})
+                  {(gradeScalesQuery.data ?? []).map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.scaleCode} ({g.cadre})
                     </option>
                   ))}
                 </select>

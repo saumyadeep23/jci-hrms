@@ -103,6 +103,7 @@ class AttendanceRegularizationServiceTest {
                 LocalDate.of(2026, 3, 10), dailyAttendance, RegularizationReasonCode.FORGOT_PUNCH, "Forgot to punch",
                 Instant.parse("2026-03-10T04:15:00Z"), Instant.parse("2026-03-10T12:45:00Z"));
         ReflectionTestUtils.setField(application, "id", 3L);
+        application.setDesignatedApprover(employee);
         when(regularizationRepository.findById(3L)).thenReturn(Optional.of(application));
 
         LeaveType cl = new LeaveType("CL", "Casual Leave", new BigDecimal("8.0"), false, true);
@@ -115,7 +116,7 @@ class AttendanceRegularizationServiceTest {
         when(leaveLedgerEntryRepository.findByRelatedDailyAttendanceId(7L)).thenReturn(Optional.of(originalDebit));
         when(leaveBalanceRepository.findByEmployeeIdAndLeaveTypeIdAndYear(1L, 50L, 2026)).thenReturn(Optional.of(clBalance));
 
-        AttendanceRegularizationResponse response = service.approve(3L, new RegularizationDecisionRequest(true, "Approved by HoD"));
+        AttendanceRegularizationResponse response = service.approve(3L, new RegularizationDecisionRequest(true, "Approved by HoD"), 1L);
 
         assertThat(response.approvalStatus()).isEqualTo(ApprovalStatus.APPROVED);
         assertThat(dailyAttendance.getDetailStatus()).isEqualTo(AttendanceDetailStatus.PRESENT);
@@ -130,9 +131,10 @@ class AttendanceRegularizationServiceTest {
                 LocalDate.of(2026, 3, 10), dailyAttendance, RegularizationReasonCode.FORGOT_PUNCH, "Forgot to punch",
                 Instant.parse("2026-03-10T04:15:00Z"), Instant.parse("2026-03-10T12:45:00Z"));
         ReflectionTestUtils.setField(application, "id", 4L);
+        application.setDesignatedApprover(employee);
         when(regularizationRepository.findById(4L)).thenReturn(Optional.of(application));
 
-        service.approve(4L, new RegularizationDecisionRequest(true, "Approved"));
+        service.approve(4L, new RegularizationDecisionRequest(true, "Approved"), 1L);
 
         org.mockito.Mockito.verifyNoInteractions(leaveLedgerEntryRepository);
     }
@@ -143,11 +145,112 @@ class AttendanceRegularizationServiceTest {
                 LocalDate.of(2026, 3, 10), dailyAttendance, RegularizationReasonCode.FORGOT_PUNCH, "Forgot to punch",
                 Instant.now(), Instant.now());
         ReflectionTestUtils.setField(application, "id", 6L);
+        application.setDesignatedApprover(employee);
         when(regularizationRepository.findById(6L)).thenReturn(Optional.of(application));
 
-        service.approve(6L, new RegularizationDecisionRequest(false, "Insufficient justification"));
+        service.approve(6L, new RegularizationDecisionRequest(false, "Insufficient justification"), 1L);
 
         assertThat(dailyAttendance.getDetailStatus()).isEqualTo(AttendanceDetailStatus.UNAUTHORIZED_LATE);
         assertThat(dailyAttendance.isRegularized()).isFalse();
+    }
+
+    // ---- Duplicate-submission guard ----
+
+    @Test
+    void submit_pendingRequestAlreadyExistsForSameDate_throwsConflict() {
+        when(regularizationRepository.existsByEmployeeIdAndAttendanceDateAndApprovalStatus(
+                1L, LocalDate.of(2026, 3, 10), ApprovalStatus.PENDING)).thenReturn(true);
+        AttendanceRegularizationRequest request = new AttendanceRegularizationRequest(1L, LocalDate.of(2026, 3, 10),
+                RegularizationReasonCode.FORGOT_PUNCH, "Forgot to punch", Instant.now(), Instant.now());
+
+        assertThatThrownBy(() -> service.submit(request))
+                .isInstanceOf(in.gov.jci.hrms.exception.DuplicatePendingRegularizationException.class);
+
+        org.mockito.Mockito.verify(regularizationRepository, org.mockito.Mockito.never()).saveAndFlush(any());
+    }
+
+    @Test
+    void submit_noExistingPendingRequest_succeeds() {
+        when(regularizationRepository.existsByEmployeeIdAndAttendanceDateAndApprovalStatus(
+                1L, LocalDate.of(2026, 3, 10), ApprovalStatus.PENDING)).thenReturn(false);
+        AttendanceRegularizationRequest request = new AttendanceRegularizationRequest(1L, LocalDate.of(2026, 3, 10),
+                RegularizationReasonCode.FORGOT_PUNCH, "Forgot to punch", Instant.now(), Instant.now());
+
+        AttendanceRegularizationResponse response = service.submit(request);
+
+        assertThat(response.approvalStatus()).isEqualTo(ApprovalStatus.PENDING);
+    }
+
+    // ---- Approver authorization: strictly the designated approver, no role-based override ----
+    // (HR_ADMIN/SUPER_ADMIN get broader READ access via findAll() - see AttendanceRegularizationController's
+    // GET /all - but acting on a request is still gated on being the actual designatedApprover; the
+    // controller's @PreAuthorize on GET /all is what restricts visibility, not anything the service checks.)
+
+    @Test
+    void approve_byDesignatedApprover_succeeds() {
+        Employee hod = new Employee("EMP-HOD", "Head", "Officer", "hod@example.com",
+                LocalDate.of(2015, 1, 1), employee.getDepartment(), employee.getDesignation());
+        ReflectionTestUtils.setField(hod, "id", 42L);
+
+        AttendanceRegularizationApplication application = new AttendanceRegularizationApplication(employee,
+                LocalDate.of(2026, 3, 10), dailyAttendance, RegularizationReasonCode.FORGOT_PUNCH, "Forgot to punch",
+                Instant.now(), Instant.now());
+        application.setDesignatedApprover(hod);
+        ReflectionTestUtils.setField(application, "id", 8L);
+        when(regularizationRepository.findById(8L)).thenReturn(Optional.of(application));
+
+        AttendanceRegularizationResponse response = service.approve(8L, new RegularizationDecisionRequest(true, "OK"), 42L);
+
+        assertThat(response.approvalStatus()).isEqualTo(ApprovalStatus.APPROVED);
+    }
+
+    @Test
+    void approve_byUnrelatedEmployee_throwsAccessDenied() {
+        Employee hod = new Employee("EMP-HOD", "Head", "Officer", "hod@example.com",
+                LocalDate.of(2015, 1, 1), employee.getDepartment(), employee.getDesignation());
+        ReflectionTestUtils.setField(hod, "id", 42L);
+
+        AttendanceRegularizationApplication application = new AttendanceRegularizationApplication(employee,
+                LocalDate.of(2026, 3, 10), dailyAttendance, RegularizationReasonCode.FORGOT_PUNCH, "Forgot to punch",
+                Instant.now(), Instant.now());
+        application.setDesignatedApprover(hod);
+        ReflectionTestUtils.setField(application, "id", 9L);
+        when(regularizationRepository.findById(9L)).thenReturn(Optional.of(application));
+
+        // Some other employee (not the designated approver) tries to decide it - even an HR_ADMIN/SUPER_ADMIN
+        // caller would hit this same check, since the service has no notion of role at all, only callerId.
+        assertThatThrownBy(() -> service.approve(9L, new RegularizationDecisionRequest(true, "OK"), 777L))
+                .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+
+        assertThat(application.getApprovalStatus()).isEqualTo(ApprovalStatus.PENDING);
+    }
+
+    // ---- HR_ADMIN/SUPER_ADMIN organization-wide visibility (GET /all) ----
+
+    @Test
+    void findAll_returnsEveryRequestRegardlessOfDesignatedApprover_newestFirst() {
+        Employee hod = new Employee("EMP-HOD", "Head", "Officer", "hod@example.com",
+                LocalDate.of(2015, 1, 1), employee.getDepartment(), employee.getDesignation());
+        ReflectionTestUtils.setField(hod, "id", 42L);
+
+        AttendanceRegularizationApplication older = new AttendanceRegularizationApplication(employee,
+                LocalDate.of(2026, 3, 5), dailyAttendance, RegularizationReasonCode.FORGOT_PUNCH, "Forgot to punch",
+                Instant.now(), Instant.now());
+        older.setDesignatedApprover(hod);
+        ReflectionTestUtils.setField(older, "id", 20L);
+        ReflectionTestUtils.setField(older, "createdAt", Instant.parse("2026-03-05T00:00:00Z"));
+
+        AttendanceRegularizationApplication newer = new AttendanceRegularizationApplication(employee,
+                LocalDate.of(2026, 3, 10), dailyAttendance, RegularizationReasonCode.FORGOT_PUNCH, "Forgot to punch",
+                Instant.now(), Instant.now());
+        // No designated approver at all - findAll() must still surface it, unlike findAllDecidedByApprover().
+        ReflectionTestUtils.setField(newer, "id", 21L);
+        ReflectionTestUtils.setField(newer, "createdAt", Instant.parse("2026-03-10T00:00:00Z"));
+
+        when(regularizationRepository.findAll()).thenReturn(java.util.List.of(older, newer));
+
+        java.util.List<AttendanceRegularizationResponse> result = service.findAll();
+
+        assertThat(result).extracting(AttendanceRegularizationResponse::id).containsExactly(21L, 20L);
     }
 }

@@ -10,7 +10,6 @@ import in.gov.jci.hrms.entity.EmployeeEmploymentCategory;
 import in.gov.jci.hrms.entity.EmployeeStatus;
 import in.gov.jci.hrms.entity.EmployeeSuperannuationDetails;
 import in.gov.jci.hrms.entity.EmploymentCategory;
-import in.gov.jci.hrms.entity.PayScale;
 import in.gov.jci.hrms.entity.PostIncumbency;
 import in.gov.jci.hrms.entity.PostMaster;
 import in.gov.jci.hrms.entity.RegionalOffice;
@@ -27,7 +26,6 @@ import in.gov.jci.hrms.repository.EmployeeEmploymentCategoryRepository;
 import in.gov.jci.hrms.repository.EmployeeRepository;
 import in.gov.jci.hrms.repository.EmployeeSpecification;
 import in.gov.jci.hrms.repository.EmployeeSuperannuationDetailsRepository;
-import in.gov.jci.hrms.repository.PayScaleRepository;
 import in.gov.jci.hrms.repository.PostIncumbencyRepository;
 import in.gov.jci.hrms.repository.PostMasterRepository;
 import in.gov.jci.hrms.repository.RegionalOfficeRepository;
@@ -54,7 +52,6 @@ public class EmployeeService {
     private final DesignationRepository designationRepository;
     private final RegionalOfficeRepository regionalOfficeRepository;
     private final DepartmentalPurchaseCentreRepository dpcRepository;
-    private final PayScaleRepository payScaleRepository;
     private final EmployeeEmploymentCategoryRepository employmentCategoryRepository;
     private final EmployeeSuperannuationDetailsRepository superannuationDetailsRepository;
     private final EmployeeCodeGeneratorService employeeCodeGeneratorService;
@@ -68,7 +65,6 @@ public class EmployeeService {
                             DesignationRepository designationRepository,
                             RegionalOfficeRepository regionalOfficeRepository,
                             DepartmentalPurchaseCentreRepository dpcRepository,
-                            PayScaleRepository payScaleRepository,
                             EmployeeEmploymentCategoryRepository employmentCategoryRepository,
                             EmployeeSuperannuationDetailsRepository superannuationDetailsRepository,
                             EmployeeCodeGeneratorService employeeCodeGeneratorService,
@@ -81,7 +77,6 @@ public class EmployeeService {
         this.designationRepository = designationRepository;
         this.regionalOfficeRepository = regionalOfficeRepository;
         this.dpcRepository = dpcRepository;
-        this.payScaleRepository = payScaleRepository;
         this.employmentCategoryRepository = employmentCategoryRepository;
         this.superannuationDetailsRepository = superannuationDetailsRepository;
         this.employeeCodeGeneratorService = employeeCodeGeneratorService;
@@ -251,7 +246,10 @@ public class EmployeeService {
         employee.setOfficialMobile(request.officialMobile());
         employee.setRegionalOffice(resolveRegionalOffice(request.roId()));
         employee.setDepartmentalPurchaseCentre(resolveDpc(request.dpcId()));
-        employee.setPayScale(resolvePayScale(request.payScaleId()));
+        // request.payScaleId() is deliberately never read here - V60 dropped employees.pay_scale_id/
+        // Employee.payScale entirely (see that migration's header); the field survives on
+        // EmployeeRequest only because removing it would ripple through every positional-constructor
+        // test, same reasoning as OnboardingPersonalDetailsRequest's own now-inert fields.
         employee.setStatus(request.status());
         employee.setGeofenceExempted(request.geofenceExempted());
 
@@ -262,6 +260,7 @@ public class EmployeeService {
         // rejected, since a client that flips EPS off isn't expected to also remember to clear this.
         employee.setEpsHigherPensionEligible(epsEligible && Boolean.TRUE.equals(request.isEpsHigherPensionEligible()));
         employee.setPranNumber(request.pranNumber());
+        employee.setUanNo(request.uanNo());
     }
 
     private Department resolveDepartment(Long id) {
@@ -290,13 +289,6 @@ public class EmployeeService {
                 .orElseThrow(() -> new MasterDataNotFoundException("DPC", id));
     }
 
-    private PayScale resolvePayScale(Long id) {
-        if (id == null) {
-            return null;
-        }
-        return payScaleRepository.findById(id)
-                .orElseThrow(() -> new MasterDataNotFoundException("Pay Scale", id));
-    }
 
     private Employee findEmployeeOrThrow(Long id) {
         return employeeRepository.findById(id)

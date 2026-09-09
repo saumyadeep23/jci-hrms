@@ -10,10 +10,8 @@ import in.gov.jci.hrms.entity.Employee;
 import in.gov.jci.hrms.entity.EmployeeStatus;
 import in.gov.jci.hrms.entity.Gender;
 import in.gov.jci.hrms.entity.MaritalStatus;
-import in.gov.jci.hrms.entity.PayScale;
 import in.gov.jci.hrms.entity.RegionalOffice;
 import in.gov.jci.hrms.entity.Salutation;
-import in.gov.jci.hrms.entity.ScaleType;
 import in.gov.jci.hrms.exception.DuplicateEmployeeException;
 import in.gov.jci.hrms.exception.EmployeeNotFoundException;
 import in.gov.jci.hrms.exception.MasterDataNotFoundException;
@@ -23,7 +21,6 @@ import in.gov.jci.hrms.repository.DesignationRepository;
 import in.gov.jci.hrms.repository.EmployeeEmploymentCategoryRepository;
 import in.gov.jci.hrms.repository.EmployeeRepository;
 import in.gov.jci.hrms.repository.EmployeeSuperannuationDetailsRepository;
-import in.gov.jci.hrms.repository.PayScaleRepository;
 import in.gov.jci.hrms.repository.RegionalOfficeRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -72,8 +69,6 @@ class EmployeeServiceTest {
     @Mock
     private DepartmentalPurchaseCentreRepository dpcRepository;
     @Mock
-    private PayScaleRepository payScaleRepository;
-    @Mock
     private EmployeeEmploymentCategoryRepository employmentCategoryRepository;
     @Mock
     private EmployeeSuperannuationDetailsRepository superannuationDetailsRepository;
@@ -94,13 +89,12 @@ class EmployeeServiceTest {
     private Designation designation;
     private RegionalOffice regionalOffice;
     private DepartmentalPurchaseCentre dpc;
-    private PayScale payScale;
 
     @BeforeEach
     void setUp() {
         employeeService = new EmployeeService(
                 employeeRepository, departmentRepository, designationRepository,
-                regionalOfficeRepository, dpcRepository, payScaleRepository, employmentCategoryRepository,
+                regionalOfficeRepository, dpcRepository, employmentCategoryRepository,
                 superannuationDetailsRepository, employeeCodeGeneratorService, cpfAcNoGeneratorService,
                 postMasterRepository, postIncumbencyRepository, postIncumbencyService);
 
@@ -115,16 +109,12 @@ class EmployeeServiceTest {
 
         dpc = new DepartmentalPurchaseCentre(regionalOffice, "DPC-DEL-01", "Delhi DPC 1", "New Delhi", "Delhi", true);
         ReflectionTestUtils.setField(dpc, "id", DPC_ID);
-
-        payScale = new PayScale(ScaleType.IDA, "E1", new BigDecimal("40000.00"), new BigDecimal("60000.00"),
-                new BigDecimal("3.00"), true);
-        ReflectionTestUtils.setField(payScale, "id", PAY_SCALE_ID);
     }
 
     private EmployeeRequest validRequest() {
         return new EmployeeRequest(
                 Salutation.MS, "Asha", null, "Rao", Gender.FEMALE, LocalDate.of(1990, 5, 1), MaritalStatus.SINGLE, null,
-                "Indian", null, "ABCDE1234F", "CPF00001", "123456789012", "asha.rao@example.com", null, "9876543210", null,
+                "Indian", null, "ABCDE1234F", "CPF00001", null, "123456789012", "asha.rao@example.com", null, "9876543210", null,
                 LocalDate.of(2024, 1, 15), DEPARTMENT_ID, DESIGNATION_ID, RO_ID, DPC_ID, PAY_SCALE_ID,
                 EmployeeStatus.ACTIVE, false, null, null, null, null, null
         );
@@ -135,7 +125,6 @@ class EmployeeServiceTest {
         when(designationRepository.findById(DESIGNATION_ID)).thenReturn(Optional.of(designation));
         when(regionalOfficeRepository.findById(RO_ID)).thenReturn(Optional.of(regionalOffice));
         when(dpcRepository.findById(DPC_ID)).thenReturn(Optional.of(dpc));
-        when(payScaleRepository.findById(PAY_SCALE_ID)).thenReturn(Optional.of(payScale));
     }
 
     private Employee employeeFrom(Long id, EmployeeRequest request) {
@@ -147,7 +136,6 @@ class EmployeeServiceTest {
         );
         employee.setRegionalOffice(regionalOffice);
         employee.setDepartmentalPurchaseCentre(dpc);
-        employee.setPayScale(payScale);
         employee.setStatus(request.status());
         ReflectionTestUtils.setField(employee, "id", id);
         return employee;
@@ -170,7 +158,7 @@ class EmployeeServiceTest {
         assertThat(response.designationId()).isEqualTo(DESIGNATION_ID);
         assertThat(response.roId()).isEqualTo(RO_ID);
         assertThat(response.dpcId()).isEqualTo(DPC_ID);
-        assertThat(response.payScaleId()).isEqualTo(PAY_SCALE_ID);
+        assertThat(response.payScaleId()).isNull();
         assertThat(response.status()).isEqualTo(EmployeeStatus.ACTIVE);
     }
 
@@ -190,7 +178,7 @@ class EmployeeServiceTest {
     void create_withoutOptionalMasterLinks_leavesThemNull() {
         EmployeeRequest request = new EmployeeRequest(
                 Salutation.MR, "Ravi", null, "Kumar", Gender.MALE, LocalDate.of(1988, 2, 1), MaritalStatus.MARRIED, null,
-                "Indian", null, "FGHIJ5678K", "CPF00003", null, "ravi.kumar@example.com", null, "9123456780", null,
+                "Indian", null, "FGHIJ5678K", "CPF00003", null, null, "ravi.kumar@example.com", null, "9123456780", null,
                 LocalDate.of(2024, 2, 1), DEPARTMENT_ID, DESIGNATION_ID, null, null, null,
                 EmployeeStatus.ACTIVE, false, null, null, null, null, null
         );
@@ -275,7 +263,7 @@ class EmployeeServiceTest {
 
         EmployeeRequest update = new EmployeeRequest(
                 Salutation.MS, "Asha", null, "Verma", Gender.FEMALE, LocalDate.of(1990, 5, 1), MaritalStatus.MARRIED, null,
-                "Indian", null, "ABCDE1234F", "CPF00002", null, "asha.verma@example.com", null, "9876543211", null,
+                "Indian", null, "ABCDE1234F", "CPF00002", null, null, "asha.verma@example.com", null, "9876543211", null,
                 LocalDate.of(2024, 1, 15), DEPARTMENT_ID, DESIGNATION_ID, RO_ID, DPC_ID, PAY_SCALE_ID,
                 EmployeeStatus.ACTIVE, false, null, null, null, null, null
         );

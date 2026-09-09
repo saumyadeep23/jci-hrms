@@ -23,6 +23,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.net.URI;
+import java.util.List;
 
 /**
  * GET is open to any authenticated employee (calendar visibility - everyone
@@ -75,6 +76,22 @@ public class HolidayController {
                     "Your token has no employee_id claim - cannot resolve your posting location");
         }
         return holidayService.getMyCalendar(employeeId, year, month);
+    }
+
+    /**
+     * Restricted holidays applicable to the caller's own posting location for
+     * a whole year - e.g. the Combined CL+RH form's RH dropdown - scoped and
+     * deduplicated the same way getMyCalendar() is (see HolidayService).
+     */
+    @GetMapping("/my-restricted")
+    @PreAuthorize("isAuthenticated()")
+    public List<HolidayResponse> getMyRestrictedHolidays(@RequestParam int year, Authentication authentication) {
+        Long employeeId = SecurityUtils.currentEmployeeId(authentication);
+        if (employeeId == null) {
+            throw new BusinessRuleViolationException(
+                    "Your token has no employee_id claim - cannot resolve your posting location");
+        }
+        return holidayService.getMyRestrictedHolidays(employeeId, year);
     }
 
     @PutMapping("/{id}")

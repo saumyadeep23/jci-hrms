@@ -13,9 +13,11 @@ import { Badge, ErrorState, FieldError, LoadingState, PrimaryButton, errorInputC
 import { PincodeAddressFields, EMPTY_ADDRESS, type AddressValue } from './PincodeAddressFields'
 import { DocumentUploadField } from '../../pages/hr/onboarding/DocumentUploadField'
 import { PensionSchemeSection } from './PensionSchemeSection'
+import { EmployeeVehicleAllotmentSection } from './EmployeeVehicleAllotmentSection'
 import { EmployeeQualificationsPanel } from './EmployeeQualificationsPanel'
 import { EmployeePastServicePanel } from './EmployeePastServicePanel'
 import { EmployeeFamilyNomineesPanel } from './EmployeeFamilyNomineesPanel'
+import { EmployeeQuarterAllotmentsPanel } from './EmployeeQuarterAllotmentsPanel'
 import type {
   BloodGroup,
   DepartmentResponse,
@@ -48,6 +50,7 @@ const TABS = [
   'Qualifications',
   'Past Service',
   'Family & Nominees',
+  'Company Accommodation',
 ] as const
 type Tab = (typeof TABS)[number]
 
@@ -133,6 +136,7 @@ type EmployeeForm = {
   motherTongue: string
   panNumber: string
   cpfAcNo: string
+  uanNo: string
   aadhaarNumber: string
   personalEmail: string
   officialEmail: string
@@ -185,6 +189,7 @@ function employeeFormFrom(employee: EmployeeResponse): EmployeeForm {
     motherTongue: employee.motherTongue ?? '',
     panNumber: employee.panNumber,
     cpfAcNo: employee.cpfAcNo ?? '',
+    uanNo: employee.uanNo ?? '',
     aadhaarNumber: '',
     personalEmail: employee.personalEmail,
     officialEmail: employee.officialEmail ?? '',
@@ -281,6 +286,13 @@ function EditEmployeeForm({
   const { show } = useToast()
   const queryClient = useQueryClient()
   const [tab, setTab] = useState<Tab>('Personal & Bio-Data')
+  // Family & Nominees saves independently via its own button/endpoint, not through this form's
+  // submit - the bug this guards against: a user fills that tab, clicks THIS button (identically
+  // labeled "Save Changes" and far more prominent - full-width, bottom of the modal, on every tab)
+  // instead of the panel's own, gets a false-positive "Employee updated." toast, and the modal closes
+  // with the family data never sent anywhere. Blocking this button while that tab has unsaved edits
+  // forces the user through the panel's own save first, so nothing gets silently discarded.
+  const [familyTabDirty, setFamilyTabDirty] = useState(false)
 
   const presentAddress = addresses.find((a) => a.addressType === 'PRESENT')
   const permanentAddress = addresses.find((a) => a.addressType === 'PERMANENT')
@@ -384,6 +396,7 @@ function EditEmployeeForm({
         motherTongue: form.motherTongue || null,
         panNumber: form.panNumber,
         cpfAcNo: form.cpfAcNo,
+        uanNo: form.uanNo || null,
         aadhaarNumber: form.aadhaarNumber || null,
         personalEmail: form.personalEmail,
         officialEmail: form.officialEmail || null,
@@ -467,6 +480,10 @@ function EditEmployeeForm({
       <form
         onSubmit={(e) => {
           e.preventDefault()
+          if (familyTabDirty) {
+            show({ tone: 'error', message: "You have unsaved Family & Nominees changes - click that tab's own \"Save Family & Nominees\" button first." })
+            return
+          }
           updateMutation.mutate()
         }}
       >
@@ -614,6 +631,17 @@ function EditEmployeeForm({
                 maxLength={20}
                 value={form.cpfAcNo}
                 onChange={(e) => setForm({ ...form, cpfAcNo: e.target.value })}
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">UAN (Universal Account Number)</label>
+              <input
+                value={form.uanNo}
+                inputMode="numeric"
+                maxLength={12}
+                placeholder="e.g. 101234567890"
+                onChange={(e) => setForm({ ...form, uanNo: e.target.value.replace(/\D/g, '').slice(0, 12) })}
                 className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
               />
             </div>
@@ -861,6 +889,10 @@ function EditEmployeeForm({
                 onChange={(patch) => setForm({ ...form, ...patch })}
               />
             </div>
+
+            <div className="col-span-2">
+              <EmployeeVehicleAllotmentSection employeeId={employee.id} />
+            </div>
           </div>
         )}
 
@@ -1002,9 +1034,19 @@ function EditEmployeeForm({
 
         {tab === 'Qualifications' && <EmployeeQualificationsPanel employeeId={employee.id} />}
         {tab === 'Past Service' && <EmployeePastServicePanel employeeId={employee.id} />}
-        {tab === 'Family & Nominees' && <EmployeeFamilyNomineesPanel employeeId={employee.id} />}
+        {tab === 'Family & Nominees' && <EmployeeFamilyNomineesPanel employeeId={employee.id} onDirtyChange={setFamilyTabDirty} />}
+        {tab === 'Company Accommodation' && <EmployeeQuarterAllotmentsPanel employeeId={employee.id} />}
 
-        <PrimaryButton type="submit" disabled={updateMutation.isPending || !formValid} className="mt-5 w-full justify-center">
+        {familyTabDirty && (
+          <p className="mt-3 flex items-center gap-1.5 text-xs font-medium text-amber-600">
+            <AlertTriangle size={13} /> Unsaved Family &amp; Nominees changes - use that tab's own "Save Family &amp; Nominees" button before saving here.
+          </p>
+        )}
+        <PrimaryButton
+          type="submit"
+          disabled={updateMutation.isPending || !formValid || familyTabDirty}
+          className="mt-2 w-full justify-center"
+        >
           Save Changes
         </PrimaryButton>
       </form>

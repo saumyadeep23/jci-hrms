@@ -7,7 +7,6 @@ import in.gov.jci.hrms.entity.EmployeeStatus;
 import in.gov.jci.hrms.entity.EmploymentCategory;
 import in.gov.jci.hrms.entity.Gender;
 import in.gov.jci.hrms.entity.MaritalStatus;
-import in.gov.jci.hrms.entity.PayScale;
 import in.gov.jci.hrms.entity.PostMaster;
 import in.gov.jci.hrms.entity.RegionalOffice;
 import in.gov.jci.hrms.entity.Salutation;
@@ -19,6 +18,8 @@ public record EmployeeResponse(
         Long id,
         String employeeCode,
         String cpfAcNo,
+        /** EPFO Universal Account Number - portable across employers, distinct from cpfAcNo. */
+        String uanNo,
         Salutation salutation,
         String firstName,
         String middleName,
@@ -78,12 +79,12 @@ public record EmployeeResponse(
     public static EmployeeResponse from(Employee employee, EmploymentCategory employmentCategory, LocalDate superannuationDate, PostMaster currentPost) {
         RegionalOffice regionalOffice = employee.getRegionalOffice();
         DepartmentalPurchaseCentre dpc = employee.getDepartmentalPurchaseCentre();
-        PayScale payScale = employee.getPayScale();
 
         return new EmployeeResponse(
                 employee.getId(),
                 employee.getEmployeeCode(),
                 employee.getCpfAcNo(),
+                employee.getUanNo(),
                 employee.getSalutation(),
                 employee.getFirstName(),
                 employee.getMiddleName(),
@@ -110,8 +111,11 @@ public record EmployeeResponse(
                 regionalOffice != null ? regionalOffice.getName() : null,
                 dpc != null ? dpc.getId() : null,
                 dpc != null ? dpc.getName() : null,
-                payScale != null ? payScale.getId() : null,
-                payScale != null ? payScale.getGrade() : null,
+                // payScaleId/payScaleGrade below are permanently null now - V60 dropped
+                // employees.pay_scale_id/Employee.payScale entirely (the column was always empty in
+                // practice; onboarding never collected pay_scale_master data - see V52's own comment).
+                null,
+                null,
                 employee.getStatus(),
                 employee.isGeofenceExempted(),
                 resolveOfficeType(employee),

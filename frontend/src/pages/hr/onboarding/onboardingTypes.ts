@@ -35,6 +35,7 @@ export const EMPTY_PERSONAL: OnboardingPersonalDetailsRequest = {
   motherTongue: '',
   panNumber: '',
   cpfAcNo: '',
+  uanNo: '',
   aadhaarNumber: '',
   personalEmail: '',
   officialEmail: '',
@@ -260,7 +261,7 @@ export interface LocalDependent {
 }
 
 export function emptyDependent(): LocalDependent {
-  return { key: crypto.randomUUID(), name: '', relationship: '', dateOfBirth: '', isDependent: true, isCoveredMedical: false }
+  return { key: crypto.randomUUID(), name: '', relationship: 'SON', dateOfBirth: '', isDependent: true, isCoveredMedical: false }
 }
 
 export interface LocalNominee {
@@ -272,7 +273,7 @@ export interface LocalNominee {
 }
 
 export function emptyNominee(): LocalNominee {
-  return { key: crypto.randomUUID(), name: '', relationship: '', sharePercentage: '', nomineeFor: 'PF' }
+  return { key: crypto.randomUUID(), name: '', relationship: 'SPOUSE', sharePercentage: '', nomineeFor: 'PF' }
 }
 
 export interface LocalFamily {

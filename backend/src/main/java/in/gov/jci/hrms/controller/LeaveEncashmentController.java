@@ -1,10 +1,10 @@
 package in.gov.jci.hrms.controller;
 
 import in.gov.jci.hrms.dto.EncashmentGateDecisionRequest;
+import in.gov.jci.hrms.dto.LeaveEncashmentHistoryResponse;
 import in.gov.jci.hrms.dto.LeaveEncashmentRequest;
 import in.gov.jci.hrms.dto.LeaveEncashmentResponse;
 import in.gov.jci.hrms.exception.BusinessRuleViolationException;
-import in.gov.jci.hrms.repository.LeaveEncashmentApplicationRepository;
 import in.gov.jci.hrms.security.SecurityUtils;
 import in.gov.jci.hrms.service.LeaveEncashmentService;
 import jakarta.validation.Valid;
@@ -18,8 +18,10 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.Year;
 import java.util.List;
 
 /** PIMS ALMS Phase 2, Section 4 - two-gate (HR then Finance) in-service EL encashment workflow. GET endpoints (list/mine) were added in Phase 3 so the frontend history/queue views have something to read. */
@@ -27,12 +29,9 @@ import java.util.List;
 public class LeaveEncashmentController {
 
     private final LeaveEncashmentService leaveEncashmentService;
-    private final LeaveEncashmentApplicationRepository encashmentRepository;
 
-    public LeaveEncashmentController(LeaveEncashmentService leaveEncashmentService,
-                                      LeaveEncashmentApplicationRepository encashmentRepository) {
+    public LeaveEncashmentController(LeaveEncashmentService leaveEncashmentService) {
         this.leaveEncashmentService = leaveEncashmentService;
-        this.encashmentRepository = encashmentRepository;
     }
 
     @PostMapping("/api/v1/self-service/leave/encashment")
@@ -48,13 +47,29 @@ public class LeaveEncashmentController {
         if (employeeId == null) {
             throw new BusinessRuleViolationException("Your token has no employee_id claim - cannot resolve whose encashment applications to return");
         }
-        return encashmentRepository.findByEmployeeId(employeeId).stream().map(LeaveEncashmentResponse::from).toList();
+        return leaveEncashmentService.listByEmployee(employeeId);
     }
 
     @GetMapping("/api/v1/admin/leave/encashment")
     @PreAuthorize("hasAnyRole('HR_ADMIN', 'FINANCE_ADMIN', 'SUPER_ADMIN')")
     public List<LeaveEncashmentResponse> list() {
-        return encashmentRepository.findAll().stream().map(LeaveEncashmentResponse::from).toList();
+        return leaveEncashmentService.listForAdminReview();
+    }
+
+    /** Every encashment application for one employee, any gate status - the EL ledger modal's "under process" hold rows. */
+    @GetMapping("/api/v1/admin/leave/encashment/by-employee/{employeeId}")
+    @PreAuthorize("hasAnyRole('HR_ADMIN', 'FINANCE_ADMIN', 'SUPER_ADMIN')")
+    public List<LeaveEncashmentResponse> byEmployee(@PathVariable Long employeeId) {
+        return leaveEncashmentService.listByEmployee(employeeId);
+    }
+
+    /** Month/year-wise sanction history (HR/Finance audit) - month null or 0 returns the whole year. */
+    @GetMapping("/api/v1/admin/leave/encashment/history")
+    @PreAuthorize("hasAnyRole('HR_ADMIN', 'FINANCE_ADMIN', 'SUPER_ADMIN')")
+    public List<LeaveEncashmentHistoryResponse> history(@RequestParam(required = false) Integer year,
+                                                          @RequestParam(required = false) Integer month) {
+        int resolvedYear = year != null ? year : Year.now().getValue();
+        return leaveEncashmentService.listHistory(resolvedYear, month);
     }
 
     @PatchMapping("/api/v1/admin/leave/encashment/{id}/hr-approve")

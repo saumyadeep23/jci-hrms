@@ -39,6 +39,8 @@ public record EmployeeRequest(
         @Size(max = 50) String motherTongue,
         @NotBlank @Pattern(regexp = "^[A-Z]{5}[0-9]{4}[A-Z]$") String panNumber,
         @Size(max = 20) String cpfAcNo,
+        /** EPFO Universal Account Number - portable across employers, distinct from cpfAcNo. Optional. */
+        @Pattern(regexp = "^[0-9]{12}$") String uanNo,
         /** Raw 12-digit Aadhaar as captured from the user - EmployeeService masks it to "XXXX-XXXX-1234" before persisting. */
         @Pattern(regexp = "^[0-9]{12}$") String aadhaarNumber,
         @NotBlank @Email @Size(max = 255) String personalEmail,

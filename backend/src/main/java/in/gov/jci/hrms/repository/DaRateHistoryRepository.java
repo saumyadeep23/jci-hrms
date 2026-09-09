@@ -19,6 +19,9 @@ public interface DaRateHistoryRepository extends JpaRepository<DaRateHistory, Lo
 
     boolean existsByScaleTypeAndEffectiveFrom(ScaleType scaleType, LocalDate effectiveFrom);
 
+    /** IdaProjectionEngineService.commitOrder()'s lookup of the actual order row a projection batch is being committed against. */
+    Optional<DaRateHistory> findByScaleTypeAndEffectiveFrom(ScaleType scaleType, LocalDate effectiveFrom);
+
     /** The row whose range the new effectiveFrom would land inside - its effectiveTo gets closed out. */
     Optional<DaRateHistory> findTopByScaleTypeAndEffectiveFromLessThanOrderByEffectiveFromDesc(
             ScaleType scaleType,

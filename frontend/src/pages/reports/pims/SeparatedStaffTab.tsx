@@ -33,8 +33,12 @@ export function SeparatedStaffTab() {
     queryKey: ['separated-staff', search],
     queryFn: async () =>
       (
+        // No `status` param: SeparatedEmployeeDirectoryService's SQL already restricts to the 4
+        // terminal statuses unconditionally - `status` there is for narrowing to ONE specific
+        // status (e.g. "RETIRED"), not a SEPARATED/ALL toggle, so sending the literal string
+        // "SEPARATED" made the query's exact-match filter reject every real row.
         await apiClient.get<Page<SeparatedEmployeeResponse>>('/v1/employees/separated', {
-          params: { status: 'SEPARATED', search: search || undefined, size: 500 },
+          params: { search: search || undefined, size: 500 },
         })
       ).data.content,
   })

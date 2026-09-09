@@ -65,7 +65,8 @@ class LeaveApplicationControllerTest {
         Instant now = Instant.now();
         return new LeaveApplicationResponse(1L, 1L, "EMP-001", 2L, "EL",
                 LocalDate.of(2026, 3, 10), LocalDate.of(2026, 3, 12), new BigDecimal("3.0"), "Family event",
-                status, in.gov.jci.hrms.entity.LeaveSession.FULL_DAY, null, null, null, null, null, null, null, null, now, now);
+                status, in.gov.jci.hrms.entity.LeaveSession.FULL_DAY, null, null, null, null, null, null, null, null,
+                null, null, null, null, now, now);
     }
 
     @Test

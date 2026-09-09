@@ -145,10 +145,6 @@ public class Employee implements Auditable {
     @JoinColumn(name = "dpc_id")
     private DepartmentalPurchaseCentre departmentalPurchaseCentre;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "pay_scale_id")
-    private PayScale payScale;
-
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
     private EmployeeStatus status = EmployeeStatus.ACTIVE;
@@ -181,6 +177,21 @@ public class Employee implements Auditable {
     /** NPS Permanent Retirement Account Number (12 digits) - only meaningful when npsEligible. */
     @Column(name = "pran_number", length = 12)
     private String pranNumber;
+
+    /** EPFO Universal Account Number (12 digits) - portable across employers, distinct from cpfAcNo (this Trust's own internal PF ledger number). Optional. */
+    @Column(name = "uan_no", length = 20)
+    private String uanNo;
+
+    /** Prior-employer qualifying service (for pension/gratuity) recognized via an incoming fund transfer - incremented by IncomingFundTransferService.verifyAndCreditTrustLedger() from EmployeeIncomingFundTransfer.pastQualifyingServiceDays, never set directly. */
+    @Column(name = "prior_qualifying_service_days", nullable = false)
+    private int priorQualifyingServiceDays = 0;
+
+    /**
+     * Kept in sync by EmployeeVehicleAllotmentService, not settable directly - true while any
+     * ACTIVE vehicle allotment exists for this employee, suppressing Transport Allowance (Head 10).
+     */
+    @Column(name = "has_office_car", nullable = false)
+    private boolean officeCarProvided = false;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
@@ -453,14 +464,6 @@ public class Employee implements Auditable {
         this.departmentalPurchaseCentre = departmentalPurchaseCentre;
     }
 
-    public PayScale getPayScale() {
-        return payScale;
-    }
-
-    public void setPayScale(PayScale payScale) {
-        this.payScale = payScale;
-    }
-
     public EmployeeStatus getStatus() {
         return status;
     }
@@ -485,6 +488,14 @@ public class Employee implements Auditable {
         this.npsEligible = npsEligible;
     }
 
+    public boolean isOfficeCarProvided() {
+        return officeCarProvided;
+    }
+
+    public void setOfficeCarProvided(boolean officeCarProvided) {
+        this.officeCarProvided = officeCarProvided;
+    }
+
     public boolean isEpsEligible() {
         return epsEligible;
     }
@@ -507,6 +518,22 @@ public class Employee implements Auditable {
 
     public void setPranNumber(String pranNumber) {
         this.pranNumber = pranNumber;
+    }
+
+    public String getUanNo() {
+        return uanNo;
+    }
+
+    public void setUanNo(String uanNo) {
+        this.uanNo = uanNo;
+    }
+
+    public int getPriorQualifyingServiceDays() {
+        return priorQualifyingServiceDays;
+    }
+
+    public void setPriorQualifyingServiceDays(int priorQualifyingServiceDays) {
+        this.priorQualifyingServiceDays = priorQualifyingServiceDays;
     }
 
     public Instant getCreatedAt() {
@@ -549,13 +576,15 @@ public class Employee implements Auditable {
         snapshot.put("designationId", designation != null ? designation.getId() : null);
         snapshot.put("roId", regionalOffice != null ? regionalOffice.getId() : null);
         snapshot.put("dpcId", departmentalPurchaseCentre != null ? departmentalPurchaseCentre.getId() : null);
-        snapshot.put("payScaleId", payScale != null ? payScale.getId() : null);
         snapshot.put("status", status);
         snapshot.put("geofenceExempted", geofenceExempted);
         snapshot.put("npsEligible", npsEligible);
+        snapshot.put("officeCarProvided", officeCarProvided);
         snapshot.put("epsEligible", epsEligible);
         snapshot.put("epsHigherPensionEligible", epsHigherPensionEligible);
         snapshot.put("pranNumber", pranNumber);
+        snapshot.put("uanNo", uanNo);
+        snapshot.put("priorQualifyingServiceDays", priorQualifyingServiceDays);
         snapshot.put("deletedAt", deletedAt);
         return snapshot;
     }

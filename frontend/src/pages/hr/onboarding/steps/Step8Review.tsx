@@ -83,6 +83,7 @@ export function Step8Review({
               ['Marital Status', personal.maritalStatus],
               ['PAN', personal.panNumber],
               ['CPF A/C No.', personal.cpfAcNo],
+              ['UAN', personal.uanNo || '-'],
               ['Personal Email', personal.personalEmail],
               ['Phone', personal.phone],
             ]}

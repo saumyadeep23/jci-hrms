@@ -98,12 +98,17 @@ export function Step7Family({
                 onChange={(e) => updateDependent(row.key, { name: e.target.value })}
                 className="col-span-2 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
               />
-              <input
-                placeholder="Relationship"
+              <select
                 value={row.relationship}
                 onChange={(e) => updateDependent(row.key, { relationship: e.target.value })}
                 className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
-              />
+              >
+                <option value="FATHER">Father</option>
+                <option value="MOTHER">Mother</option>
+                <option value="SPOUSE">Spouse</option>
+                <option value="SON">Son</option>
+                <option value="DAUGHTER">Daughter</option>
+              </select>
               <DatePicker value={row.dateOfBirth} onChange={(v) => updateDependent(row.key, { dateOfBirth: v })} />
               <label className="flex items-center gap-1 text-xs text-slate-600">
                 <input type="checkbox" checked={row.isCoveredMedical} onChange={(e) => updateDependent(row.key, { isCoveredMedical: e.target.checked })} />
@@ -131,18 +136,25 @@ export function Step7Family({
                 onChange={(e) => updateNominee(row.key, { name: e.target.value })}
                 className="col-span-2 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
               />
-              <input
-                placeholder="Relationship"
+              <select
                 value={row.relationship}
                 onChange={(e) => updateNominee(row.key, { relationship: e.target.value })}
                 className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
-              />
-              <input
-                placeholder="Nominee For (e.g. PF)"
+              >
+                <option value="FATHER">Father</option>
+                <option value="MOTHER">Mother</option>
+                <option value="SPOUSE">Spouse</option>
+                <option value="SON">Son</option>
+                <option value="DAUGHTER">Daughter</option>
+              </select>
+              <select
                 value={row.nomineeFor}
                 onChange={(e) => updateNominee(row.key, { nomineeFor: e.target.value })}
                 className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
-              />
+              >
+                <option value="PF">PF</option>
+                <option value="GRATUITY">Gratuity</option>
+              </select>
               <input
                 type="number"
                 step="0.01"

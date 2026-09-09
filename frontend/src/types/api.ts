@@ -191,6 +191,8 @@ export interface EmployeeResponse {
   id: number
   employeeCode: string
   cpfAcNo: string | null
+  /** EPFO Universal Account Number - portable across employers, distinct from cpfAcNo. */
+  uanNo: string | null
   salutation: Salutation
   firstName: string
   middleName: string | null
@@ -256,6 +258,8 @@ export interface EmployeeRequest {
   panNumber: string
   /** Employee's real Contributory Provident Fund account number - client-supplied, same as panNumber. */
   cpfAcNo: string
+  /** EPFO Universal Account Number (12 digits) - portable across employers, distinct from cpfAcNo. Optional. */
+  uanNo?: string | null
   /** Raw 12-digit Aadhaar - the backend masks it to "XXXX-XXXX-1234" before storing. */
   aadhaarNumber?: string | null
   personalEmail: string
@@ -435,6 +439,7 @@ export interface OnboardingPersonalDetailsRequest {
   motherTongue?: string | null
   panNumber: string
   cpfAcNo: string
+  uanNo?: string | null
   aadhaarNumber?: string | null
   personalEmail: string
   officialEmail?: string | null
@@ -526,6 +531,10 @@ export interface OnboardingDocumentEntry {
 }
 
 // --- Family / Dependents / Nominees for an already-onboarded employee (EmployeeFamilyController, EmployeeDependentController, EmployeeNomineeController) ---
+export type FamilyRelationshipType = 'FATHER' | 'MOTHER' | 'SPOUSE' | 'SON' | 'DAUGHTER'
+export type NominationType = 'PF' | 'GRATUITY'
+export type CeaEligibilityStatus = 'ELIGIBLE_STANDARD' | 'ELIGIBLE_DIVYANG' | 'INELIGIBLE_OVERAGE'
+
 export interface FamilyDetailsRequest {
   fatherName: string
   motherName?: string | null
@@ -542,14 +551,20 @@ export interface FamilyDetailsResponse extends FamilyDetailsRequest {
 export interface DependentRequest {
   employeeId: number
   name: string
-  relationship: string
+  relationship: FamilyRelationshipType
   dateOfBirth?: string | null
   isDependent: boolean
   isCoveredMedical: boolean
+  gender?: Gender | null
+  isDivyang: boolean
+  disabilityPercentage?: number | null
+  isMultipleBirthSecondDelivery: boolean
 }
 
 export interface DependentResponse extends DependentRequest {
   id: number
+  /** Computed server-side; null unless relationship is SON/DAUGHTER. */
+  ceaEligibility: CeaEligibilityStatus | null
   createdAt: string
   updatedAt: string
 }
@@ -557,15 +572,127 @@ export interface DependentResponse extends DependentRequest {
 export interface NomineeRequest {
   employeeId: number
   name: string
-  relationship: string
+  relationship: FamilyRelationshipType
   sharePercentage: number
-  nomineeFor: string
+  nomineeFor: NominationType
+  /** When set, name/relationship above are ignored server-side and derived from this Family Register row instead. */
+  dependentId?: number | null
 }
 
 export interface NomineeResponse extends NomineeRequest {
   id: number
+  dependentDateOfBirth?: string | null
   createdAt: string
   updatedAt: string
+}
+
+// --- Family & Nominees edit tab composite (EmployeeFamilyNomineeCompositeController) - the single
+// "Save Changes" payload replacing the old separate family/dependent/nominee save actions. ---
+export interface CompositeDependentEntry {
+  /** Stable per-row key: the dependent's own id as a string for an existing row, or a UI-generated temp key (e.g. "new-1") for a row added this session - CompositeNomineeEntry.dependentClientKey references this. */
+  clientKey: string
+  id?: number | null
+  name: string
+  relationship: FamilyRelationshipType
+  dateOfBirth: string
+  gender?: Gender | null
+  isDependent: boolean
+  isCoveredMedical: boolean
+  isDivyang: boolean
+  disabilityPercentage?: number | null
+  isMultipleBirthSecondDelivery: boolean
+}
+
+export interface CompositeNomineeEntry {
+  id?: number | null
+  dependentClientKey: string
+  sharePercentage: number
+}
+
+/** fatherName/motherName/spouseName/spouseDob are no longer sent directly - the backend derives employee_family_details' own columns from whichever FATHER/MOTHER/SPOUSE row is present in `dependents` (the top-of-tab inputs for them were redundant with the register and have been removed). */
+export interface EmployeeFamilyNomineeCompositeRequest {
+  dependents: CompositeDependentEntry[]
+  pfNominees: CompositeNomineeEntry[]
+  gratuityNominees: CompositeNomineeEntry[]
+}
+
+export interface EmployeeFamilyNomineeCompositeResponse {
+  family: FamilyDetailsResponse | null
+  dependents: DependentResponse[]
+  pfNominees: NomineeResponse[]
+  gratuityNominees: NomineeResponse[]
+}
+
+// --- CEA / Hostel Subsidy claims (CeaClaimController) ---
+export type CeaClaimType = 'CEA' | 'HOSTEL_SUBSIDY'
+export type CeaClaimStatus = 'SUBMITTED' | 'VERIFIED' | 'BILL_PASSED' | 'DISBURSED' | 'REJECTED'
+
+/** claimNo is client-supplied (office-assigned convention, same as MovementOrderCreateRequest.orderRefNo). */
+export interface CeaClaimSubmitRequest {
+  claimNo: string
+  dependentId: number
+  academicYear: string
+  claimType: CeaClaimType
+  schoolName: string
+  schoolRegNo?: string | null
+  standardClass: string
+  periodFrom: string
+  periodTo: string
+  claimedAmount: number
+  supportingDocRef?: string | null
+}
+
+export interface CeaClaimResponse {
+  id: number
+  claimNo: string
+  employeeId: number
+  employeeCode: string
+  fullName: string
+  dependentId: number
+  dependentName: string
+  academicYear: string
+  claimType: CeaClaimType
+  schoolName: string
+  schoolRegNo: string | null
+  standardClass: string
+  periodFrom: string
+  periodTo: string
+  claimedAmount: number
+  admissibleAmount: number
+  passedAmount: number | null
+  claimStatus: CeaClaimStatus
+  verifiedByOfficerId: number | null
+  verifiedAt: string | null
+  sanctionOrderNo: string | null
+  sanctionDate: string | null
+  sanctionedByOfficerId: number | null
+  billNo: string | null
+  billDate: string | null
+  passedByOfficerId: number | null
+  passedAt: string | null
+  isPayrollProcessed: boolean
+  payrollBatchId: number | null
+  supportingDocRef: string | null
+  rejectionReason: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+/** adjustedAdmissibleAmount is optional - null keeps the amount computed at submission time. */
+export interface CeaClaimVerifyRequest {
+  adjustedAdmissibleAmount?: number | null
+}
+
+export interface CeaClaimBillPassRequest {
+  passedAmount: number
+  billNo: string
+  billDate: string
+  sanctionOrderNo: string
+  sanctionDate: string
+}
+
+export interface CeaClaimRejectRequest {
+  reason: string
 }
 
 // --- Social Profile / Reservation Data (operational-features task, Section 1) ---
@@ -998,7 +1125,11 @@ export interface StateMasterResponse {
   stateName: string
   stateType: StateType
   active: boolean
+  isRemoteArea: boolean
+  /** "0.00" when isRemoteArea is false; (0.00, 100.00] when true - see V67's chk_state_remote_allowance_rule. */
+  remoteAllowancePercentage: number
   createdAt: string
+  updatedAt: string
 }
 
 export interface StateMasterRequest {
@@ -1006,6 +1137,8 @@ export interface StateMasterRequest {
   stateName: string
   stateType: StateType
   active: boolean
+  isRemoteArea: boolean
+  remoteAllowancePercentage: number
 }
 
 export interface DistrictMasterResponse {
@@ -1121,6 +1254,10 @@ export interface ServiceBookEventResponse {
   designationTitle: string | null
   regionalOfficeName: string | null
   basicPay: number | null
+  /** EL encashment structured metadata (V64) - null for every non-encashment event type. */
+  daysEncashed: number | null
+  daRate: number | null
+  grossAmount: number | null
   eventDescription: string | null
   remarks: string | null
   isMigrated: boolean
@@ -1149,7 +1286,7 @@ export interface ServiceBookEventRequest {
   departmentId?: number | null
   designationId?: number | null
   regionalOfficeId?: number | null
-  payScaleId?: number | null
+  gradeScaleId?: number | null
   basicPay?: number | null
   remarks?: string | null
 }
@@ -1189,6 +1326,11 @@ export interface SuperannuationCalculationPreviewResponse {
 /** FIRST_HALF/SECOND_HALF is CL-only (LeaveValidationService enforces that) - null/omitted on a request means FULL_DAY. */
 export type LeaveSession = 'FULL_DAY' | 'FIRST_HALF' | 'SECOND_HALF'
 
+/** Tracked separately from `status` - a PENDING_APPROVAL application can pass through zero or more RECOMMENDED forwards before reaching SANCTIONED/REJECTED. */
+export type LeaveWorkflowStage = 'SUBMITTED' | 'RECOMMENDED' | 'SANCTIONED' | 'REJECTED' | 'CANCELLED'
+
+export type LeaveActionType = 'SUBMIT' | 'RECOMMEND_FORWARD' | 'SANCTION' | 'REJECT'
+
 export interface LeaveApplicationResponse {
   id: number
   employeeId: number
@@ -1203,6 +1345,11 @@ export interface LeaveApplicationResponse {
   leaveSession: LeaveSession
   approverPostId: number | null
   approverEmployeeId: number | null
+  workflowStage: LeaveWorkflowStage
+  /** Whose desk the file is on right now - starts as approverEmployeeId at submit(), moves with every forward(). */
+  currentAssignedToEmployeeId: number | null
+  currentAssignedToName: string | null
+  currentAssignedToDesignation: string | null
   /** Links a combined CL+RH pair (CombinedLeaveApplicationService) - null for a standalone application. */
   groupApplicationId: string | null
   rhEntryId: number | null
@@ -1220,6 +1367,43 @@ export interface LeaveApplicationRequest {
   totalDays: number
   reason: string
   leaveSession?: LeaveSession | null
+}
+
+// --- Leave routing / forwarding / sanctioning (LeaveRoutingController, /api/v1/leaves) ---
+export interface LeaveForwardRequest {
+  forwardedToEmployeeId: number
+  remarks?: string | null
+}
+
+/** Shared by sanction (remarks optional) and reject (remarks mandatory - the backend enforces that). */
+export interface LeaveDecisionRequest {
+  remarks?: string | null
+}
+
+export interface LeaveRoutingActionResponse {
+  id: number
+  actionType: LeaveActionType
+  actionByEmployeeId: number
+  actionByName: string
+  actionByDesignation: string | null
+  forwardedToEmployeeId: number | null
+  forwardedToName: string | null
+  remarks: string | null
+  createdAt: string
+}
+
+export interface LeaveSanctionHistoryResponse {
+  id: number
+  employeeCode: string
+  employeeName: string
+  leaveTypeCode: string
+  startDate: string
+  endDate: string
+  totalDays: number
+  forwardedByName: string | null
+  sanctionedByName: string | null
+  decidedAt: string
+  status: string
 }
 
 // --- Leave types (LeaveTypeController, Phase A) ---
@@ -1341,6 +1525,8 @@ export type LeaveLedgerSource =
   | 'EL_EOL_LAPSE_DEDUCTION'
   | 'EL_ENCASHMENT_DEBIT'
   | 'ATTENDANCE_PENALTY_REFUND'
+  | 'TRANSFER_JT_CONVERSION'
+  | 'TERMINAL_ENCASHMENT'
 
 // --- ALMS Phase 2/3: EL entitlement sub-ledger (LeaveEntitlementBalanceController) ---
 export interface LeaveEntitlementBalanceResponse {
@@ -1441,6 +1627,10 @@ export interface LeaveEncashmentResponse {
   id: number
   employeeId: number
   employeeCode: string
+  fullName: string
+  designation: string | null
+  /** Null when the caller isn't the admin-review listing (the only endpoint that resolves it - see LeaveEncashmentService.listForAdminReview). */
+  currentBasicPay: number | null
   encashmentType: EncashmentType
   elDaysClaimed: number
   hplDaysClaimed: number
@@ -1454,8 +1644,44 @@ export interface LeaveEncashmentResponse {
   financeRemarks: string | null
   payrollEligible: boolean
   serviceBookEntryId: number | null
+  /** Null for applications submitted before V63 and never finance-approved since. */
+  daRateApplied: number | null
+  daEffectiveDate: string | null
+  grossAmount: number | null
+  arrearSettled: boolean
+  arrearAmount: number
+  arrearDaRateDiff: number
+  /** Non-null once queued into a payroll run (PayrollRunService.compute()); null means not yet queued for any run. */
+  payrollCycleYear: number | null
+  payrollCycleMonth: number | null
+  payrollProcessed: boolean
+  /** The arrear's own (possibly later) payroll queue - independent of payrollCycleYear/Month above. */
+  arrearPayrollCycleYear: number | null
+  arrearPayrollCycleMonth: number | null
+  applicationDate: string
   createdAt: string
   updatedAt: string
+}
+
+/** Month/year-wise sanction history row - voucherRefNo is a synthesized "ELE-{id}" display value, not a real finance voucher number (this schema has no separate voucher-numbering system). */
+export interface LeaveEncashmentHistoryResponse {
+  id: number
+  voucherRefNo: string
+  employeeId: number
+  employeeCode: string
+  fullName: string
+  designation: string | null
+  elDaysClaimed: number
+  basicPay: number | null
+  daRateApplied: number | null
+  grossAmount: number | null
+  arrearAmount: number
+  arrearSettled: boolean
+  hrApprovedAt: string | null
+  hrApprovedByName: string | null
+  financeApprovedAt: string | null
+  financeApprovedByName: string | null
+  status: 'SANCTIONED' | 'REJECTED'
 }
 
 // --- ALMS Phase 2/3: attendance regularization (AttendanceRegularizationController) ---
@@ -1486,12 +1712,16 @@ export interface AttendanceRegularizationResponse {
   id: number
   employeeId: number
   employeeCode: string
+  employeeName: string
   attendanceDate: string
   dailyAttendanceId: number | null
   reasonCode: RegularizationReasonCode
   remarks: string | null
   correctedInTime: string
   correctedOutTime: string
+  /** The day's real punch times (DailyAttendance.inTime/outTime) - null when there is no linked daily_attendance row (e.g. a genuinely missed punch being regularized) or no punch was recorded on that side. */
+  actualInTime: string | null
+  actualOutTime: string | null
   approvalStatus: ApprovalStatus
   designatedApproverId: number | null
   approvedAt: string | null
@@ -1575,6 +1805,89 @@ export interface DaRateHistoryRequest {
   orderNumber?: string | null
   orderDate?: string | null
   remarks?: string | null
+}
+
+// --- CPSE IDA Enhancement / Arrear Projection (IdaProjectionController) ---
+export type DaProjectionBatchStatus = 'DRAFT' | 'ORDER_COMMITTED'
+
+export interface IdaProjectionSimulateRequest {
+  scaleType: ScaleType
+  newDaRate: number
+  effectiveFrom: string
+  drawalMonth: number
+  drawalYear: number
+}
+
+/** One calendar month's org-wide totals across every impacted employee. */
+export interface IdaProjectionMonthWiseSummary {
+  salMonth: number
+  salYear: number
+  monthLabel: string
+  totalDeltaDa: number
+  totalEmployeeCpfArrear: number
+  totalEmployerJcpfArrear: number
+  totalEmployeeNpsArrear: number
+  totalEmployerNpsArrear: number
+  totalNetMonthlyArrear: number
+  totalEmployerCostMonthly: number
+}
+
+export interface IdaProjectionSummaryResponse {
+  id: number
+  projectionCode: string
+  scaleType: ScaleType
+  oldDaRate: number
+  newDaRate: number
+  effectiveFrom: string
+  expectedDrawalMonth: number
+  expectedDrawalYear: number
+  retroMonthsCount: number
+  totalActiveEmployees: number
+  totalMonthlyGrossDelta: number
+  totalMonthlyEmployerCostDelta: number
+  totalArrearGrossOutgo: number
+  totalArrearNetOutgo: number
+  totalEmployerCostOutgo: number
+  status: DaProjectionBatchStatus
+  monthWiseBreakup: IdaProjectionMonthWiseSummary[]
+}
+
+export interface IdaProjectionMonthlyBreakupResponse {
+  salMonth: number
+  salYear: number
+  monthLabel: string
+  totalDays: number
+  paidDays: number
+  actualBasicPay: number
+  oldDaRate: number
+  newDaRate: number
+  deltaDa: number
+  employeeCpfArrear: number
+  employerJcpfArrear: number
+  employeeNpsArrear: number
+  employerNpsArrear: number
+  netMonthlyArrear: number
+  employerCostMonthly: number
+}
+
+export type PensionScheme = 'CPF' | 'NPS'
+
+export interface IdaProjectionEmployeeResponse {
+  employeeId: number
+  employeeCode: string
+  fullName: string
+  designation: string | null
+  pensionScheme: PensionScheme
+  totalMonthsCount: number
+  totalGrossArrears: number
+  totalEmployeeCpfArrear: number
+  totalEmployerJcpfArrear: number
+  totalEmployeeNpsArrear: number
+  totalEmployerNpsArrear: number
+  totalLeaveEncashmentArrear: number
+  totalNetArrearPayable: number
+  totalEmployerCost: number
+  monthlyBreakups: IdaProjectionMonthlyBreakupResponse[]
 }
 
 // --- Payroll reporting (Phase 11) ---
@@ -2363,4 +2676,677 @@ export interface TerminalSettlementGenerateRequest {
   separationDate: string
   clearanceRequestId?: number | null
   cpfAccruedInterest?: number | null
+}
+
+// --- JCI Payroll Engine master configuration (PayrollMasterController, /api/v1/payroll/masters) ---
+// CityClass ('X'|'Y'|'Z') is already declared above (Regional Office section) - reused here as-is.
+
+/** No designationId - the live payroll_transport_allowance_rates table keys a rate by grade scale + city class only. */
+export interface TransportAllowanceResponse {
+  id: number
+  gradeScaleId: number | null
+  scaleCode: string | null
+  cityClass: CityClass
+  baseRate: number
+  effectiveFrom: string
+  createdAt: string
+}
+
+export interface TransportAllowanceRequest {
+  gradeScaleId: number
+  cityClass: CityClass
+  baseRate: number
+  effectiveFrom: string
+}
+
+export interface ProcurementAllowanceResponse {
+  id: number
+  designationId: number
+  designationTitle: string
+  monthlyAllowance: number
+  effectiveFrom: string
+  effectiveTo: string | null
+  createdAt: string
+}
+
+export interface ProcurementAllowanceRequest {
+  designationId: number
+  monthlyAllowance: number
+  effectiveFrom: string
+}
+
+export interface PtaxSlabResponse {
+  id: number
+  stateCode: string
+  slabMin: number
+  slabMax: number | null
+  taxAmount: number
+  specialMonth: number | null
+  specialMonthTax: number | null
+  effectiveFrom: string
+  effectiveTo: string | null
+  createdAt: string
+}
+
+export interface PtaxSlabRequest {
+  stateCode: string
+  slabMin: number
+  slabMax: number | null
+  taxAmount: number
+  specialMonth: number | null
+  specialMonthTax: number | null
+  effectiveFrom: string
+}
+
+export type SalaryHeadEffectType = 'EARNING' | 'DEDUCTION' | 'NO_EFFECT'
+
+/** headCount is the catalog's own primary key (not a display-order field) - see SalaryHead.java's javadoc. */
+export interface SalaryHeadResponse {
+  headCount: number
+  description: string
+  shortName: string
+  effectType: SalaryHeadEffectType
+  isVariable: boolean
+  applicableFor: string
+  salSlipVis: number | null
+  basicDependent: boolean
+  refAccountCode: string | null
+}
+
+/** PUT /api/v1/payroll/masters/salary-heads/{headCount} - every catalog field except headCount itself is editable. */
+export interface SalaryHeadUpdateRequest {
+  description: string
+  shortName: string
+  effectType: SalaryHeadEffectType
+  isVariable: boolean
+  applicableFor: string
+  salSlipVis: number
+  basicDependent: boolean
+  refAccountCode: string
+}
+
+export interface StatutoryHeadResponse {
+  statHeadCount: number
+  statHeadDescr: string
+  statHeadShortName: string
+}
+
+/** PUT /api/v1/payroll/masters/statutory-heads/{statHeadCount}. */
+export interface StatutoryHeadUpdateRequest {
+  description: string
+  shortName: string
+}
+
+export type NpsDeclarationStatus = 'ACTIVE' | 'SUPERSEDED' | 'CANCELLED'
+
+export interface NpsDeclarationResponse {
+  id: number
+  employeeId: number
+  employeeCode: string
+  employeeName: string
+  financialYear: string
+  npsPercentage: number
+  effectiveFrom: string
+  status: NpsDeclarationStatus
+  remarks: string | null
+  createdAt: string
+}
+
+/** npsPercentage must be within [3.00, 10.00]. */
+export interface NpsDeclarationRequest {
+  employeeId: number
+  npsPercentage: number
+  remarks?: string | null
+}
+
+// --- NPS Declaration Desk & HR Compliance Dashboard (NpsDeclarationController, /api/v1/payroll/declarations/nps) ---
+export interface NpsPreviewResponse {
+  employeeId: number
+  employeeCode: string
+  employeeName: string
+  basicPay: number
+  dearnessAllowance: number
+  currentFinancialYear: string
+  alreadyDeclaredForCurrentFy: boolean
+  currentFyDeclaration: NpsDeclarationResponse | null
+  history: NpsDeclarationResponse[]
+}
+
+export interface NpsSubmittedRow {
+  employeeId: number
+  employeeCode: string
+  employeeName: string
+  officeOrDpc: string | null
+  declaredPercentage: number
+  monthlyDeduction: number | null
+  submissionDate: string
+  remarks: string | null
+}
+
+export interface NpsPendingRow {
+  employeeId: number
+  employeeCode: string
+  employeeName: string
+  officeOrDpc: string | null
+}
+
+export interface NpsAdminSummaryResponse {
+  financialYear: string
+  submitted: NpsSubmittedRow[]
+  pending: NpsPendingRow[]
+}
+
+// --- HRA Rate Master (PayrollMasterController, /api/v1/payroll/masters/hra-rates) ---
+export interface PayrollHraRateResponse {
+  id: number
+  cityClass: CityClass
+  ratePercentage: number
+  minAmount: number
+  effectiveFrom: string
+  effectiveTo: string | null
+  remarks: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface PayrollHraRateRequest {
+  cityClass: CityClass
+  ratePercentage: number
+  minAmount: number
+  effectiveFrom: string
+  effectiveTo?: string | null
+  remarks?: string | null
+}
+
+// --- Employee Company Accommodation / Quarter Allotments (EmployeeQuarterAllotmentController,
+// /api/v1/employees/{employeeId}/quarter-allotments) - address-based (JCI leases/provides
+// accommodation at an address, it does not own quarters in an estate). ---
+export type QuarterAllotmentStatus = 'OCCUPIED' | 'VACATED' | 'SURRENDERED' | 'CANCELLED'
+
+export interface QuarterAllotmentResponse {
+  id: number
+  employeeId: number
+  allotmentOrderNo: string | null
+  addressLine1: string
+  addressLine2: string | null
+  city: string | null
+  stateCode: string | null
+  pincode: string | null
+  syncCurrentAddress: boolean
+  licenseFee: number
+  waterCharges: number
+  electricCharges: number
+  allottedFrom: string
+  vacatedOn: string | null
+  status: QuarterAllotmentStatus
+  remarks: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+/** When syncCurrentAddress is true, this address also overwrites the employee's PRESENT address on save. */
+export interface QuarterAllotmentRequest {
+  allotmentOrderNo?: string | null
+  addressLine1: string
+  addressLine2?: string | null
+  city: string
+  stateCode: string
+  pincode: string
+  syncCurrentAddress: boolean
+  licenseFee: number
+  waterCharges: number
+  electricCharges: number
+  allottedFrom: string
+  vacatedOn?: string | null
+  status: QuarterAllotmentStatus
+  remarks?: string | null
+}
+
+// --- Vehicle Allotment Transaction Management (EmployeeVehicleAllotmentController,
+// /api/v1/employees/{employeeId}/vehicle-allotments) ---
+export type VehicleAllotmentStatus = 'ACTIVE' | 'SURRENDERED' | 'TRANSFERRED' | 'CANCELLED'
+
+export interface VehicleAllotmentResponse {
+  id: number
+  employeeId: number
+  allotmentOrderNo: string | null
+  vehicleRegNo: string
+  vehicleMakeModel: string | null
+  driverProvided: boolean
+  personalUseAllowed: boolean
+  deductionApplicable: boolean
+  monthlyDeductionAmount: number
+  allottedFrom: string
+  surrenderedOn: string | null
+  status: VehicleAllotmentStatus
+  remarks: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface VehicleAllotmentRequest {
+  allotmentOrderNo?: string | null
+  vehicleRegNo: string
+  vehicleMakeModel?: string | null
+  driverProvided: boolean
+  personalUseAllowed: boolean
+  deductionApplicable: boolean
+  monthlyDeductionAmount: number
+  allottedFrom: string
+  remarks?: string | null
+}
+
+export interface VehicleAllotmentSurrenderRequest {
+  surrenderedOn: string
+  remarks?: string | null
+}
+
+// --- Statutory Parameters console (PayrollMasterController, /api/v1/payroll/masters/statutory-parameters) ---
+export type StatutoryParamValueType = 'DECIMAL' | 'PERCENTAGE' | 'AMOUNT'
+
+export interface StatutoryParameterResponse {
+  id: number
+  paramKey: string
+  paramName: string
+  paramValue: number
+  valType: StatutoryParamValueType
+  effectiveFrom: string
+  effectiveTo: string | null
+  remarks: string | null
+  updatedAt: string
+}
+
+export interface StatutoryParameterReviseRequest {
+  newValue: number
+  newEffectiveFrom: string
+  remarks?: string | null
+}
+
+// --- Deputation & Suspension lifecycle / PIMS Reporting Hub "Deputed Staff" & "Suspended Staff" tabs ---
+export type DeputationDirection = 'DEPUTATION_OUT' | 'DEPUTATION_IN'
+export type DeputationStatus = 'ACTIVE' | 'REPATRIATED'
+export type PayOption = 'PARENT_CADRE_BASIC_PLUS_DEP_ALLOWANCE' | 'FOREIGN_POST_PAY_SCALE'
+export type LspcBorneBy = 'BORROWING_ORG' | 'LENDING_ORG'
+
+export interface DeputedStaffReportDto {
+  employeeId: number
+  empCode: string
+  employeeName: string
+  cadre: string | null
+  designation: string | null
+  deputationDirection: DeputationDirection
+  organizationName: string
+  organizationType: string
+  postingStation: string
+  isSameStation: boolean
+  periodFrom: string
+  periodTo: string
+  extensionValidUpTo: string | null
+  payOption: PayOption
+  deputationAllowanceRate: number
+  deputationAllowanceCap: number
+  lspcApplicable: boolean
+  lspcBorneBy: LspcBorneBy
+  lspcMonthlyRate: number
+  status: DeputationStatus
+}
+
+export interface DeputedStaffReportResponse {
+  rows: DeputedStaffReportDto[]
+  totalDeputedOut: number
+  totalDeputedIn: number
+  dueForRepatriationThisQuarter: number
+}
+
+export type SuspensionStatus = 'UNDER_SUSPENSION' | 'REVOKED'
+export type RegularizationType = 'REINSTATED' | 'DISMISSED' | 'COMPULSORILY_RETIRED'
+export type NecStatus = 'VERIFIED' | 'PENDING_VERIFICATION' | 'NOT_SUBMITTED'
+
+export interface SuspendedStaffReportDto {
+  employeeId: number
+  empCode: string
+  employeeName: string
+  cadre: string | null
+  designation: string | null
+  hqStation: string
+  suspensionOrderNo: string
+  suspensionOrderDate: string
+  effectiveFrom: string
+  daysUnderSuspension: number
+  currentSubsistencePercentage: number
+  isReviewOverdue: boolean
+  currentMonthNecStatus: NecStatus
+  status: SuspensionStatus
+  regularizationType: RegularizationType | null
+}
+
+export interface SuspendedStaffReportResponse {
+  rows: SuspendedStaffReportDto[]
+  totalUnderSuspension: number
+  pendingNecThisMonth: number
+  pending90DayReviews: number
+}
+
+// --- CPF Trust: Incoming Fund Transfer-In (CpfTrustController) ---
+export type IncomingTransferStatus = 'SUBMITTED' | 'VERIFIED_BY_TRUST' | 'CREDITED_TO_LEDGER' | 'REJECTED'
+export type IncomingTransferType = 'PF_ONLY' | 'PENSION_ONLY' | 'PF_AND_PENSION'
+export type IncomingTransferPaymentMode = 'CHEQUE' | 'DEMAND_DRAFT' | 'NEFT' | 'RTGS' | 'OTHER'
+// PastServiceOrganizationType is already declared above (Past Service Records section) - reused here as-is,
+// since employee_incoming_fund_transfers.source_organization_type shares the exact same enum.
+
+export interface IncomingFundTransferRequest {
+  employeeId: number
+  pastServiceRecordId?: number | null
+  sourceOrganizationName: string
+  sourceOrganizationType: PastServiceOrganizationType
+  transferType: IncomingTransferType
+  relievingDate: string
+  jciJoiningDate: string
+  paymentMode: IncomingTransferPaymentMode
+  instrumentOrUtrNo: string
+  instrumentDate: string
+  bankRealizationDate: string
+  bankAccountCode: string
+  eeCpfPrincipal: number
+  eeCpfInterest: number
+  erJcpfPrincipal: number
+  erJcpfInterest: number
+  vpfPrincipal: number
+  vpfInterest: number
+  totalCpfTransferred: number
+  /** Short scheme code (EPS-95, NPS, ...) - max 10 chars. */
+  pensionScheme: string
+  pensionCorpusAmount?: number | null
+  pranOrPpoNo?: string | null
+  pastQualifyingServiceYears?: number | null
+  pastQualifyingServiceDays?: number | null
+  gratuityTransferredAmount?: number | null
+  gratuityServiceCounted: boolean
+  annexureKDocRef?: string | null
+  sanctionOrderNo?: string | null
+  sanctionDate?: string | null
+  createdByEmployeeId?: number | null
+}
+
+export interface IncomingFundTransferResponse {
+  id: number
+  transferReferenceNo: string
+  employeeId: number
+  employeeCode: string
+  employeeName: string
+  pastServiceRecordId: number | null
+  sourceOrganizationName: string
+  sourceOrganizationType: PastServiceOrganizationType
+  transferType: IncomingTransferType
+  relievingDate: string
+  jciJoiningDate: string
+  paymentMode: IncomingTransferPaymentMode
+  instrumentOrUtrNo: string
+  instrumentDate: string
+  bankRealizationDate: string
+  bankAccountCode: string
+  eeCpfPrincipal: number
+  eeCpfInterest: number
+  erJcpfPrincipal: number
+  erJcpfInterest: number
+  vpfPrincipal: number
+  vpfInterest: number
+  totalCpfTransferred: number
+  pensionScheme: string
+  pensionCorpusAmount: number
+  pranOrPpoNo: string | null
+  pastQualifyingServiceYears: number
+  pastQualifyingServiceDays: number
+  gratuityTransferredAmount: number
+  gratuityServiceCounted: boolean
+  annexureKDocRef: string | null
+  sanctionOrderNo: string | null
+  sanctionDate: string | null
+  status: IncomingTransferStatus
+  creditedAt: string | null
+  creditedByEmployeeId: number | null
+  rejectionRemarks: string | null
+  createdAt: string
+}
+
+export interface CreditLedgerRequest {
+  trustOfficerId: number
+  remarks?: string | null
+}
+
+export interface RejectRemarksRequest {
+  remarks: string
+}
+
+// --- CPF Trust: Member Passbook + Para 60(2) rate resolution + interim settlement (CpfTrustController) ---
+export type CpfLedgerEntryType =
+  | 'OPENING_BALANCE'
+  | 'PAYROLL_MONTHLY'
+  | 'DA_ARREAR'
+  | 'TRANSFER_IN'
+  | 'LOAN_WITHDRAWAL'
+  | 'LOAN_REPAYMENT'
+  | 'ANNUAL_INTEREST'
+  | 'INTERIM_SETTLEMENT_INTEREST'
+  | 'FINAL_SETTLEMENT'
+
+export interface CpfTrustLedgerEntryResponse {
+  id: number
+  employeeId: number
+  finYear: string
+  salMonth: number | null
+  salYear: number | null
+  valueDate: string
+  entryType: CpfLedgerEntryType
+  eeShareCredit: number
+  eeShareDebit: number
+  erShareCredit: number
+  erShareDebit: number
+  vpfCredit: number
+  vpfDebit: number
+  interestCredit: number
+  totalCredit: number
+  totalDebit: number
+  runningEeBalance: number
+  runningErBalance: number
+  runningVpfBalance: number
+  runningTotalBalance: number
+  payrollRunId: number | null
+  transferId: number | null
+  loanId: number | null
+  isProvisionalRate: boolean
+  rateApplied: number | null
+  rateSourceFinYear: string | null
+  referenceDocNo: string | null
+  remarks: string | null
+  createdAt: string
+}
+
+/** GET /api/v1/payroll/trust/cpf/passbook/{employeeId}?finYear= - includes the FY's posted ledger plus, when
+ * this FY's interest isn't posted yet, an in-memory-only shadow-accrual projection (accruedInterestFytd). */
+export interface CpfPassbookResponse {
+  employeeId: number
+  finYear: string
+  entries: CpfTrustLedgerEntryResponse[]
+  ledgerBalance: number
+  accruedInterestFytd: number
+  effectiveTotalCorpus: number
+  rateApplied: number
+  rateSourceFinYear: string
+  isProvisionalRate: boolean
+  provisionalNotice: string | null
+}
+
+export type CpfInterimSettlementType = 'SUPERANNUATION' | 'RESIGNATION' | 'DEATH' | 'TRANSFER_OUT'
+
+export interface CrystallizeInterimInterestRequest {
+  employeeId: number
+  settlementDate: string
+  settlementType: CpfInterimSettlementType
+}
+
+// --- CPF Rate of Interest Entry (CpfStatutoryInterestRateController) - the notification master
+// CpfRateResolutionService's Para 60(2) resolution reads from. ---
+export interface CpfStatutoryInterestRateRequest {
+  finYear: string
+  baseCpfRate: number
+  loanMarkupRate: number
+  ministryOrderNo: string
+  orderDate: string
+}
+
+/** effectiveLoanRate/effectiveFrom/effectiveTo are server-computed, never client-supplied - see CpfStatutoryInterestRateRequest. */
+export interface CpfStatutoryInterestRateResponse {
+  id: number
+  finYear: string
+  baseCpfRate: number
+  loanMarkupRate: number
+  effectiveLoanRate: number
+  effectiveFrom: string
+  effectiveTo: string
+  ministryOrderNo: string
+  orderDate: string
+  isActive: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+// --- CPF Trust Members' List (CpfTrustMemberController) - primary identifiers are cpfAcNo and uanNo. ---
+export interface CpfTrustMemberResponse {
+  employeeId: number
+  employeeCode: string
+  fullName: string
+  cpfAcNo: string
+  uanNo: string | null
+  status: string
+  departmentName: string | null
+  designationName: string | null
+  /** Only populated once the employee has actually separated (see the backend's own status-gating comment) - null for active members. */
+  separationDate: string | null
+  cpfSettlementStatus: string | null
+  /** Only populated once cpfSettlementStatus reaches DISBURSED. */
+  cpfSettlementDate: string | null
+  /** separationDate -> cpfSettlementDate gap in days - the "settled after separation" backlog this list exists to surface. Null until both dates are known. */
+  settlementLagDays: number | null
+}
+
+// --- CPF Trust: Loan/Withdrawal Origination (CpfLoanController) ---
+export type CpfLoanType = 'REFUNDABLE_LOAN' | 'NON_REFUNDABLE_WITHDRAWAL'
+export type CpfLoanApplicationStatus = 'APPLIED' | 'SANCTIONED' | 'DISBURSED' | 'CLOSED' | 'REJECTED'
+/** cpf_loan_applications.recovery_phase - which of the two sequential payroll recovery phases a DISBURSED loan is in. */
+export type CpfLoanRecoveryPhase = 'PRINCIPAL' | 'INTEREST' | 'CLOSED'
+export const CPF_LOAN_PURPOSES = ['HOUSING', 'MEDICAL', 'MARRIAGE', 'EDUCATION', 'SPECIAL'] as const
+export type CpfLoanPurpose = (typeof CPF_LOAN_PURPOSES)[number]
+
+export interface CpfLoanEligibilityResponse {
+  employeeId: number
+  runningEeBalance: number
+  runningVpfBalance: number
+  totalEligibleCorpus: number
+  maxPermissibleAmount: number
+  activeLoanExists: boolean
+  outstandingActiveLoanBalance: number
+  eligibilityReason: string
+}
+
+export interface CpfLoanApplicationRequest {
+  employeeId: number
+  loanType: CpfLoanType
+  purpose: string
+  appliedAmount: number
+  totalInstallments: number
+  reason?: string | null
+}
+
+export interface CpfLoanSanctionRequest {
+  sanctionedAmount: number
+  sanctionOrderNo: string
+  sanctionDate: string
+  totalInstallments: number
+  /** Number of installments the total interest is spread over - separate from totalInstallments (the principal schedule), since Head 30 then Head 31 recovery runs sequentially, not in parallel. */
+  interestInstallments: number
+}
+
+export interface CpfLoanApplicationResponse {
+  id: number
+  loanApplicationNo: string
+  employeeId: number
+  employeeCode: string
+  employeeName: string
+  loanType: CpfLoanType
+  purpose: string
+  applicationReason: string | null
+  appliedAmount: number
+  sanctionedAmount: number
+  sanctionOrderNo: string | null
+  sanctionDate: string | null
+  baseCpfRate: number
+  interestRate: number
+  totalInterestAmount: number
+  monthlyRecoveryPrincipal: number
+  monthlyRecoveryInterest: number
+  totalInstallments: number
+  recoveredInstallments: number
+  totalInterestInstallments: number
+  recoveredInterestInstallments: number
+  outstandingBalance: number
+  outstandingInterest: number
+  recoveryPhase: CpfLoanRecoveryPhase
+  isPreclosed: boolean
+  preclosedAt: string | null
+  status: CpfLoanApplicationStatus
+  rejectionRemarks: string | null
+  disbursedAt: string | null
+  createdAt: string
+}
+
+// --- CPF Loan Settlement (direct out-of-payroll cash/instrument settlement - CpfLoanController) ---
+export type CpfLoanSettlementMode = 'CASH' | 'CHEQUE' | 'DEMAND_DRAFT' | 'NEFT' | 'RTGS' | 'OTHER'
+
+/** GET /v1/payroll/trust/loans/{id}/settlement-quote - netPayoffAmount is what fully closes the loan today, factoring in the interest rebate for tenure not actually used. */
+export interface CpfLoanSettlementQuoteResponse {
+  loanId: number
+  elapsedMonths: number
+  outstandingBalance: number
+  outstandingInterest: number
+  originalProjectedInterest: number
+  recomputedStatutoryInterest: number
+  interestRebateAmount: number
+  netPayoffAmount: number
+}
+
+export interface CpfLoanSettlementRequest {
+  principalPaid: number
+  interestPaid: number
+  settlementType: CpfLoanSettlementMode
+  instrumentOrChallanNo: string
+  instrumentDate: string
+  bankRealizationDate: string
+  trustBankAccountCode: string
+  challanDocRef?: string | null
+  remarks?: string | null
+}
+
+export interface CpfLoanSettlementResponse {
+  id: number
+  receiptVoucherNo: string
+  loanId: number
+  loanApplicationNo: string
+  employeeId: number
+  finYear: string
+  settlementType: CpfLoanSettlementMode
+  instrumentOrChallanNo: string
+  instrumentDate: string
+  bankRealizationDate: string
+  trustBankAccountCode: string
+  principalPaid: number
+  interestPaid: number
+  totalAmountPaid: number
+  isEarlyForeclosure: boolean
+  elapsedMonths: number
+  originalProjectedInterest: number
+  recomputedStatutoryInterest: number
+  interestRebateAmount: number
+  remarks: string | null
+  createdAt: string
 }

@@ -3,10 +3,13 @@ package in.gov.jci.hrms.service;
 import in.gov.jci.hrms.dto.PayrollRunRequest;
 import in.gov.jci.hrms.dto.PayrollRunResponse;
 import in.gov.jci.hrms.dto.PayslipResponse;
+import in.gov.jci.hrms.entity.ApprovalStatus;
 import in.gov.jci.hrms.entity.Department;
 import in.gov.jci.hrms.entity.Designation;
 import in.gov.jci.hrms.entity.Employee;
+import in.gov.jci.hrms.entity.EncashmentType;
 import in.gov.jci.hrms.entity.HeadType;
+import in.gov.jci.hrms.entity.LeaveEncashmentApplication;
 import in.gov.jci.hrms.entity.PayrollRun;
 import in.gov.jci.hrms.entity.PayrollRunStatus;
 import in.gov.jci.hrms.entity.Payslip;
@@ -15,6 +18,7 @@ import in.gov.jci.hrms.exception.BusinessRuleViolationException;
 import in.gov.jci.hrms.exception.MasterDataConflictException;
 import in.gov.jci.hrms.exception.MasterDataNotFoundException;
 import in.gov.jci.hrms.repository.EmployeeRepository;
+import in.gov.jci.hrms.repository.LeaveEncashmentApplicationRepository;
 import in.gov.jci.hrms.repository.PayrollRunRepository;
 import in.gov.jci.hrms.repository.PayslipItemRepository;
 import in.gov.jci.hrms.repository.PayslipRepository;
@@ -35,6 +39,8 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -52,13 +58,22 @@ class PayrollRunServiceTest {
     private EmployeeRepository employeeRepository;
     @Mock
     private PayrollComputationService payrollComputationService;
+    @Mock
+    private LeaveEncashmentApplicationRepository encashmentRepository;
+    @Mock
+    private LeaveEncashmentService leaveEncashmentService;
 
     private PayrollRunService payrollRunService;
 
     @BeforeEach
     void setUp() {
         payrollRunService = new PayrollRunService(payrollRunRepository, payslipRepository, payslipItemRepository,
-                salaryHeadMasterRepository, employeeRepository, payrollComputationService);
+                salaryHeadMasterRepository, employeeRepository, payrollComputationService, encashmentRepository, leaveEncashmentService);
+
+        lenient().when(encashmentRepository.findByFinanceApprovalStatusAndPayrollRunIsNull(ApprovalStatus.APPROVED)).thenReturn(List.of());
+        lenient().when(encashmentRepository.findByArrearSettledFalseAndArrearPayrollRunIsNull()).thenReturn(List.of());
+        lenient().when(encashmentRepository.findByPayrollRunId(any())).thenReturn(List.of());
+        lenient().when(encashmentRepository.findByArrearPayrollRunId(any())).thenReturn(List.of());
     }
 
     private PayrollRun runFrom(Long id, PayrollRunStatus status) {
@@ -142,6 +157,65 @@ class PayrollRunServiceTest {
         assertThat(response.status()).isEqualTo(PayrollRunStatus.COMPUTED);
         org.mockito.Mockito.verify(payslipRepository, org.mockito.Mockito.times(2)).saveAndFlush(any(Payslip.class));
         org.mockito.Mockito.verify(payslipItemRepository, org.mockito.Mockito.times(14)).save(any());
+    }
+
+    @Test
+    void compute_queuesApprovedEncashmentsAndPendingArrearsForTheirEmployees() {
+        PayrollRun run = runFrom(1L, PayrollRunStatus.DRAFT);
+        Employee emp1 = employee(10L);
+
+        when(payrollRunRepository.findById(1L)).thenReturn(Optional.of(run));
+        when(salaryHeadMasterRepository.findAll()).thenReturn(List.of(
+                head(1L, "BASIC", HeadType.EARNING), head(2L, "DA", HeadType.EARNING),
+                head(3L, "HRA", HeadType.EARNING), head(4L, "TA", HeadType.EARNING),
+                head(5L, "EPF_EE", HeadType.DEDUCTION), head(6L, "EPF_ER", HeadType.EMPLOYER_CONTRIBUTION),
+                head(7L, "EPS_ER", HeadType.EMPLOYER_CONTRIBUTION),
+                head(8L, "EL_ENCASHMENT", HeadType.EARNING), head(9L, "EL_ENCASHMENT_ARREAR", HeadType.EARNING)));
+        when(employeeRepository.findAll()).thenReturn(List.of(emp1));
+
+        PayrollComputationService.PayrollComputationResult result = new PayrollComputationService.PayrollComputationResult(
+                new BigDecimal("50000.00"), new BigDecimal("8500.00"), new BigDecimal("14040.00"), new BigDecimal("1872.00"),
+                new BigDecimal("7020.00"), new BigDecimal("5770.50"), new BigDecimal("1249.50"),
+                new BigDecimal("74412.00"), new BigDecimal("7020.00"), new BigDecimal("7020.00"),
+                new BigDecimal("67392.00"), BigDecimal.ZERO, false);
+        when(payrollComputationService.compute(any(Employee.class), any(PayrollRun.class))).thenReturn(result);
+        when(payslipRepository.saveAndFlush(any(Payslip.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        LeaveEncashmentApplication encashment = new LeaveEncashmentApplication(emp1, EncashmentType.IN_SERVICE_EL,
+                new BigDecimal("20.00"), BigDecimal.ZERO);
+        encashment.setGrossAmount(new BigDecimal("64148.40"));
+        LeaveEncashmentApplication arrear = new LeaveEncashmentApplication(emp1, EncashmentType.IN_SERVICE_EL,
+                new BigDecimal("20.00"), BigDecimal.ZERO);
+        arrear.setArrearAmount(new BigDecimal("1500.00"));
+        when(encashmentRepository.findByFinanceApprovalStatusAndPayrollRunIsNull(ApprovalStatus.APPROVED)).thenReturn(List.of(encashment));
+        when(encashmentRepository.findByArrearSettledFalseAndArrearPayrollRunIsNull()).thenReturn(List.of(arrear));
+
+        payrollRunService.compute(1L);
+
+        assertThat(encashment.getPayrollRun()).isSameAs(run);
+        assertThat(arrear.getArrearPayrollRun()).isSameAs(run);
+        verify(payslipItemRepository, org.mockito.Mockito.times(9)).save(any());
+    }
+
+    @Test
+    void finalizeRun_marksQueuedEncashmentsProcessedAndClearsArrears() {
+        PayrollRun run = runFrom(1L, PayrollRunStatus.COMPUTED);
+        when(payrollRunRepository.findById(1L)).thenReturn(Optional.of(run));
+
+        Employee emp1 = employee(10L);
+        LeaveEncashmentApplication encashment = new LeaveEncashmentApplication(emp1, EncashmentType.IN_SERVICE_EL,
+                new BigDecimal("20.00"), BigDecimal.ZERO);
+        LeaveEncashmentApplication arrear = new LeaveEncashmentApplication(emp1, EncashmentType.IN_SERVICE_EL,
+                new BigDecimal("20.00"), BigDecimal.ZERO);
+        arrear.setArrearAmount(new BigDecimal("1500.00"));
+        when(encashmentRepository.findByPayrollRunId(1L)).thenReturn(List.of(encashment));
+        when(encashmentRepository.findByArrearPayrollRunId(1L)).thenReturn(List.of(arrear));
+
+        payrollRunService.finalizeRun(1L, "finance.admin");
+
+        assertThat(encashment.isPayrollProcessed()).isTrue();
+        assertThat(arrear.isArrearSettled()).isTrue();
+        verify(leaveEncashmentService).recordArrearClearance(arrear, 2026, 8);
     }
 
     @Test

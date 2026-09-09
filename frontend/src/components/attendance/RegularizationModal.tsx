@@ -7,7 +7,7 @@ import { describeApiError } from '../../lib/apiError'
 import { ErrorState, PrimaryButton, SecondaryButton } from '../common/ui'
 import type { AttendanceRegularizationRequest, DailyAttendanceDetailResponse, RegularizationReasonCode } from '../../types/api'
 
-const REASON_OPTIONS: { value: RegularizationReasonCode; label: string }[] = [
+export const REASON_OPTIONS: { value: RegularizationReasonCode; label: string }[] = [
   { value: 'FORGOT_PUNCH', label: 'Forgot to Punch' },
   { value: 'DEVICE_FAILURE', label: 'Device / App Failure' },
   { value: 'FIELD_DUTY', label: 'Local Official / Field Duty' },

@@ -4,6 +4,8 @@ import in.gov.jci.hrms.audit.Auditable;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EntityListeners;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -16,8 +18,10 @@ import org.hibernate.annotations.SQLRestriction;
 import org.hibernate.annotations.UpdateTimestamp;
 import in.gov.jci.hrms.audit.AuditableEntityListener;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.Period;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -38,8 +42,9 @@ public class EmployeeDependent implements Auditable {
     @Column(name = "name", nullable = false, length = 150)
     private String name;
 
+    @Enumerated(EnumType.STRING)
     @Column(name = "relationship", nullable = false, length = 50)
-    private String relationship;
+    private FamilyRelationshipType relationship;
 
     @Column(name = "date_of_birth")
     private LocalDate dateOfBirth;
@@ -49,6 +54,19 @@ public class EmployeeDependent implements Auditable {
 
     @Column(name = "is_covered_medical", nullable = false)
     private boolean coveredMedical = false;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "gender", length = 30)
+    private Gender gender;
+
+    @Column(name = "is_divyang", nullable = false)
+    private boolean divyang = false;
+
+    @Column(name = "disability_percentage", precision = 5, scale = 2)
+    private BigDecimal disabilityPercentage;
+
+    @Column(name = "is_multiple_birth_second_delivery", nullable = false)
+    private boolean multipleBirthSecondDelivery = false;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
@@ -64,7 +82,7 @@ public class EmployeeDependent implements Auditable {
     protected EmployeeDependent() {
     }
 
-    public EmployeeDependent(Employee employee, String name, String relationship, boolean dependent, boolean coveredMedical) {
+    public EmployeeDependent(Employee employee, String name, FamilyRelationshipType relationship, boolean dependent, boolean coveredMedical) {
         this.employee = employee;
         this.name = name;
         this.relationship = relationship;
@@ -92,11 +110,11 @@ public class EmployeeDependent implements Auditable {
         this.name = name;
     }
 
-    public String getRelationship() {
+    public FamilyRelationshipType getRelationship() {
         return relationship;
     }
 
-    public void setRelationship(String relationship) {
+    public void setRelationship(FamilyRelationshipType relationship) {
         this.relationship = relationship;
     }
 
@@ -122,6 +140,62 @@ public class EmployeeDependent implements Auditable {
 
     public void setCoveredMedical(boolean coveredMedical) {
         this.coveredMedical = coveredMedical;
+    }
+
+    public Gender getGender() {
+        return gender;
+    }
+
+    public void setGender(Gender gender) {
+        this.gender = gender;
+    }
+
+    public boolean isDivyang() {
+        return divyang;
+    }
+
+    public void setDivyang(boolean divyang) {
+        this.divyang = divyang;
+    }
+
+    public BigDecimal getDisabilityPercentage() {
+        return disabilityPercentage;
+    }
+
+    public void setDisabilityPercentage(BigDecimal disabilityPercentage) {
+        this.disabilityPercentage = disabilityPercentage;
+    }
+
+    public boolean isMultipleBirthSecondDelivery() {
+        return multipleBirthSecondDelivery;
+    }
+
+    public void setMultipleBirthSecondDelivery(boolean multipleBirthSecondDelivery) {
+        this.multipleBirthSecondDelivery = multipleBirthSecondDelivery;
+    }
+
+    /**
+     * Children Education Allowance eligibility badge - null for any relationship other than
+     * SON/DAUGHTER (CEA is specifically a children's allowance). Divyang eligibility (age &le; 22)
+     * does not require isDependent(); the standard cutoff (age &le; 20) does. A null dateOfBirth
+     * (never actually enforced NOT NULL at the DB level) can't have an age computed, so it falls
+     * through to INELIGIBLE_OVERAGE rather than throwing.
+     */
+    public CeaEligibilityStatus computeCeaEligibility() {
+        if (relationship != FamilyRelationshipType.SON && relationship != FamilyRelationshipType.DAUGHTER) {
+            return null;
+        }
+        if (dateOfBirth == null) {
+            return CeaEligibilityStatus.INELIGIBLE_OVERAGE;
+        }
+        int age = Period.between(dateOfBirth, LocalDate.now()).getYears();
+        if (divyang && age <= 22) {
+            return CeaEligibilityStatus.ELIGIBLE_DIVYANG;
+        }
+        if (dependent && age <= 20) {
+            return CeaEligibilityStatus.ELIGIBLE_STANDARD;
+        }
+        return CeaEligibilityStatus.INELIGIBLE_OVERAGE;
     }
 
     public Instant getCreatedAt() {
@@ -159,6 +233,10 @@ public class EmployeeDependent implements Auditable {
         snapshot.put("dateOfBirth", dateOfBirth);
         snapshot.put("isDependent", dependent);
         snapshot.put("isCoveredMedical", coveredMedical);
+        snapshot.put("gender", gender);
+        snapshot.put("isDivyang", divyang);
+        snapshot.put("disabilityPercentage", disabilityPercentage);
+        snapshot.put("isMultipleBirthSecondDelivery", multipleBirthSecondDelivery);
         snapshot.put("deletedAt", deletedAt);
         return snapshot;
     }

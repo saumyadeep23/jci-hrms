@@ -8,7 +8,7 @@ import in.gov.jci.hrms.entity.Designation;
 import in.gov.jci.hrms.entity.Employee;
 import in.gov.jci.hrms.entity.EmployeeEmploymentCategory;
 import in.gov.jci.hrms.entity.EmployeeServiceBook;
-import in.gov.jci.hrms.entity.PayScale;
+import in.gov.jci.hrms.entity.GradeScaleMaster;
 import in.gov.jci.hrms.entity.RegionalOffice;
 import in.gov.jci.hrms.exception.EmployeeNotFoundException;
 import in.gov.jci.hrms.exception.MasterDataNotFoundException;
@@ -17,7 +17,7 @@ import in.gov.jci.hrms.repository.DesignationRepository;
 import in.gov.jci.hrms.repository.EmployeeEmploymentCategoryRepository;
 import in.gov.jci.hrms.repository.EmployeeRepository;
 import in.gov.jci.hrms.repository.EmployeeServiceBookRepository;
-import in.gov.jci.hrms.repository.PayScaleRepository;
+import in.gov.jci.hrms.repository.GradeScaleMasterRepository;
 import in.gov.jci.hrms.repository.RegionalOfficeRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -39,19 +39,19 @@ public class EmployeeServiceBookService {
     private final DepartmentRepository departmentRepository;
     private final DesignationRepository designationRepository;
     private final RegionalOfficeRepository regionalOfficeRepository;
-    private final PayScaleRepository payScaleRepository;
+    private final GradeScaleMasterRepository gradeScaleMasterRepository;
 
     public EmployeeServiceBookService(EmployeeServiceBookRepository serviceBookRepository, EmployeeRepository employeeRepository,
                                        EmployeeEmploymentCategoryRepository employmentCategoryRepository,
                                        DepartmentRepository departmentRepository, DesignationRepository designationRepository,
-                                       RegionalOfficeRepository regionalOfficeRepository, PayScaleRepository payScaleRepository) {
+                                       RegionalOfficeRepository regionalOfficeRepository, GradeScaleMasterRepository gradeScaleMasterRepository) {
         this.serviceBookRepository = serviceBookRepository;
         this.employeeRepository = employeeRepository;
         this.employmentCategoryRepository = employmentCategoryRepository;
         this.departmentRepository = departmentRepository;
         this.designationRepository = designationRepository;
         this.regionalOfficeRepository = regionalOfficeRepository;
-        this.payScaleRepository = payScaleRepository;
+        this.gradeScaleMasterRepository = gradeScaleMasterRepository;
     }
 
     public List<ServiceBookEventResponse> timeline(Long employeeId) {
@@ -74,7 +74,7 @@ public class EmployeeServiceBookService {
         event.setDepartment(resolveDepartment(request.departmentId()));
         event.setDesignation(resolveDesignation(request.designationId()));
         event.setRegionalOffice(resolveRegionalOffice(request.regionalOfficeId()));
-        event.setPayScale(resolvePayScale(request.payScaleId()));
+        event.setGradeScale(resolveGradeScale(request.gradeScaleId()));
         event.setBasicPay(request.basicPay());
         event.setRemarks(request.remarks());
         event.setMigrated(false);
@@ -106,8 +106,8 @@ public class EmployeeServiceBookService {
         return regionalOfficeRepository.findById(id).orElseThrow(() -> new MasterDataNotFoundException("Regional Office", id));
     }
 
-    private PayScale resolvePayScale(Long id) {
+    private GradeScaleMaster resolveGradeScale(Long id) {
         if (id == null) return null;
-        return payScaleRepository.findById(id).orElseThrow(() -> new MasterDataNotFoundException("Pay Scale", id));
+        return gradeScaleMasterRepository.findById(id).orElseThrow(() -> new MasterDataNotFoundException("Grade Scale", id));
     }
 }

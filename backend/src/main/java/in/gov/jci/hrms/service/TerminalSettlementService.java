@@ -197,7 +197,7 @@ public class TerminalSettlementService {
             BigDecimal allocated = netPayable.multiply(nominee.getSharePercentage())
                     .divide(HUNDRED, 2, RoundingMode.HALF_UP);
             beneficiaryRepository.save(new TerminalSettlementBeneficiary(
-                    settlement, BeneficiaryType.NOMINEE, nominee.getName(), nominee.getRelationship(),
+                    settlement, BeneficiaryType.NOMINEE, nominee.getName(), nominee.getRelationship().name(),
                     nominee.getSharePercentage(), allocated, null, null, null, null));
         }
     }
@@ -384,11 +384,12 @@ public class TerminalSettlementService {
      * employee_employment_categories.regular_basic_pay only if neither
      * exists, same COALESCE precedence as Manpower4TierReportService/
      * IncrementProcessingService. DA rate's ScaleType comes from the
-     * fixation's own grade scale when available, else the employee's
-     * legacy PayScale, else IDA (GradeScaleMaster's own default) - a
-     * REGULAR employee onboarded post-V52 may have neither pay_scale_id
-     * nor a resolvable scale here, so this is a last-resort default, not a
-     * confirmed policy.
+     * fixation's own grade scale when available, else IDA (GradeScaleMaster's
+     * own default) - V60 dropped the old employee.getPayScale()/
+     * pay_scale_master fallback that used to sit between those two; an
+     * employee with no current fixation and no scale to resolve at all
+     * falls straight to IDA now, a last-resort default, not a confirmed
+     * policy.
      */
     private EmoulmentsResult resolveEmoluments(Employee employee, LocalDate separationDate) {
         List<RegularPayFixation> applicable = regularPayFixationRepository.findApplicableForSettlement(employee.getId(), separationDate);
@@ -408,8 +409,7 @@ public class TerminalSettlementService {
         if (basicPay == null) {
             throw new BusinessRuleViolationException("Employee " + employee.getId() + " has no basic pay on record to base a terminal settlement on");
         }
-        ScaleType resolvedScaleType = scaleType != null ? scaleType
-                : (employee.getPayScale() != null ? employee.getPayScale().getScaleType() : ScaleType.IDA);
+        ScaleType resolvedScaleType = scaleType != null ? scaleType : ScaleType.IDA;
 
         BigDecimal daPercentage = daRateHistoryRepository
                 .findTopByScaleTypeAndActiveTrueAndEffectiveFromLessThanEqualOrderByEffectiveFromDesc(resolvedScaleType, separationDate)

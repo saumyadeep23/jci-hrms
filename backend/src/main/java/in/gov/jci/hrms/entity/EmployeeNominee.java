@@ -5,6 +5,8 @@ import in.gov.jci.hrms.audit.AuditableEntityListener;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EntityListeners;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -38,14 +40,28 @@ public class EmployeeNominee implements Auditable {
     @Column(name = "name", nullable = false, length = 150)
     private String name;
 
+    @Enumerated(EnumType.STRING)
     @Column(name = "relationship", nullable = false, length = 50)
-    private String relationship;
+    private FamilyRelationshipType relationship;
 
     @Column(name = "share_percentage", nullable = false, precision = 5, scale = 2)
     private BigDecimal sharePercentage;
 
+    @Enumerated(EnumType.STRING)
     @Column(name = "nominee_for", nullable = false, length = 50)
-    private String nomineeFor;
+    private NominationType nomineeFor;
+
+    /**
+     * Links back to the Family Register row this nominee was selected from - name/relationship above
+     * are still stored (server-derived from this link at save time via
+     * EmployeeNomineeService/EmployeeFamilyNomineeCompositeService, never client-typed when a link is
+     * present) rather than dropped, so a later edit/removal of the dependent doesn't corrupt a
+     * historical nomination record. Nullable for nominees created via the standalone
+     * /api/employees/{id}/nominees endpoint without going through the Family Register.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "dependent_id")
+    private EmployeeDependent dependent;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
@@ -61,7 +77,7 @@ public class EmployeeNominee implements Auditable {
     protected EmployeeNominee() {
     }
 
-    public EmployeeNominee(Employee employee, String name, String relationship, BigDecimal sharePercentage, String nomineeFor) {
+    public EmployeeNominee(Employee employee, String name, FamilyRelationshipType relationship, BigDecimal sharePercentage, NominationType nomineeFor) {
         this.employee = employee;
         this.name = name;
         this.relationship = relationship;
@@ -89,11 +105,11 @@ public class EmployeeNominee implements Auditable {
         this.name = name;
     }
 
-    public String getRelationship() {
+    public FamilyRelationshipType getRelationship() {
         return relationship;
     }
 
-    public void setRelationship(String relationship) {
+    public void setRelationship(FamilyRelationshipType relationship) {
         this.relationship = relationship;
     }
 
@@ -105,12 +121,20 @@ public class EmployeeNominee implements Auditable {
         this.sharePercentage = sharePercentage;
     }
 
-    public String getNomineeFor() {
+    public NominationType getNomineeFor() {
         return nomineeFor;
     }
 
-    public void setNomineeFor(String nomineeFor) {
+    public void setNomineeFor(NominationType nomineeFor) {
         this.nomineeFor = nomineeFor;
+    }
+
+    public EmployeeDependent getDependent() {
+        return dependent;
+    }
+
+    public void setDependent(EmployeeDependent dependent) {
+        this.dependent = dependent;
     }
 
     public Instant getCreatedAt() {
@@ -147,6 +171,7 @@ public class EmployeeNominee implements Auditable {
         snapshot.put("relationship", relationship);
         snapshot.put("sharePercentage", sharePercentage);
         snapshot.put("nomineeFor", nomineeFor);
+        snapshot.put("dependentId", dependent != null ? dependent.getId() : null);
         snapshot.put("deletedAt", deletedAt);
         return snapshot;
     }

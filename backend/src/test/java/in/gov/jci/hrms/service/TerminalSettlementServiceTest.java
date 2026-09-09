@@ -9,10 +9,12 @@ import in.gov.jci.hrms.entity.Department;
 import in.gov.jci.hrms.entity.Designation;
 import in.gov.jci.hrms.entity.Employee;
 import in.gov.jci.hrms.entity.EmployeeNominee;
+import in.gov.jci.hrms.entity.FamilyRelationshipType;
 import in.gov.jci.hrms.entity.LeaveBalance;
 import in.gov.jci.hrms.entity.LeaveEntitlementBalance;
 import in.gov.jci.hrms.entity.LeaveLedgerSource;
 import in.gov.jci.hrms.entity.LeaveType;
+import in.gov.jci.hrms.entity.NominationType;
 import in.gov.jci.hrms.entity.ScaleType;
 import in.gov.jci.hrms.entity.SeparationType;
 import in.gov.jci.hrms.entity.TerminalSettlement;
@@ -455,8 +457,8 @@ class TerminalSettlementServiceTest {
         stubEmploymentCategoryBasicPay(new BigDecimal("40000.00"));
         stubDaRate(new BigDecimal("10.00"));
 
-        EmployeeNominee spouse = new EmployeeNominee(employee, "Jane Doe", "Spouse", new BigDecimal("60.00"), "GRATUITY");
-        EmployeeNominee son = new EmployeeNominee(employee, "John Doe Jr.", "Son", new BigDecimal("40.00"), "GRATUITY");
+        EmployeeNominee spouse = new EmployeeNominee(employee, "Jane Doe", FamilyRelationshipType.SPOUSE, new BigDecimal("60.00"), NominationType.GRATUITY);
+        EmployeeNominee son = new EmployeeNominee(employee, "John Doe Jr.", FamilyRelationshipType.SON, new BigDecimal("40.00"), NominationType.GRATUITY);
         when(employeeNomineeRepository.findByEmployeeId(EMPLOYEE_ID)).thenReturn(List.of(spouse, son));
         when(terminalSettlementRepository.save(any())).thenAnswer(inv -> {
             TerminalSettlement s = inv.getArgument(0);
@@ -474,7 +476,7 @@ class TerminalSettlementServiceTest {
         assertThat(saved).hasSize(2);
         assertThat(saved.get(0).getBeneficiaryType()).isEqualTo(BeneficiaryType.NOMINEE);
         assertThat(saved.get(0).getBeneficiaryName()).isEqualTo("Jane Doe");
-        assertThat(saved.get(0).getRelationship()).isEqualTo("Spouse");
+        assertThat(saved.get(0).getRelationship()).isEqualTo("SPOUSE");
         assertThat(saved.get(0).getSharePercentage()).isEqualByComparingTo("60.00");
         assertThat(saved.get(0).getBankAccountNo()).isNull();
         assertThat(saved.get(0).getBankIfsc()).isNull();

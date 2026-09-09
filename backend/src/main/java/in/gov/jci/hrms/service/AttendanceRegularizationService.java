@@ -12,6 +12,7 @@ import in.gov.jci.hrms.entity.LeaveBalance;
 import in.gov.jci.hrms.entity.LeaveLedgerEntry;
 import in.gov.jci.hrms.entity.LeaveLedgerSource;
 import in.gov.jci.hrms.exception.BusinessRuleViolationException;
+import in.gov.jci.hrms.exception.DuplicatePendingRegularizationException;
 import in.gov.jci.hrms.exception.EmployeeNotFoundException;
 import in.gov.jci.hrms.exception.MasterDataNotFoundException;
 import in.gov.jci.hrms.repository.AttendanceRegularizationApplicationRepository;
@@ -19,6 +20,7 @@ import in.gov.jci.hrms.repository.DailyAttendanceRepository;
 import in.gov.jci.hrms.repository.EmployeeRepository;
 import in.gov.jci.hrms.repository.LeaveBalanceRepository;
 import in.gov.jci.hrms.repository.LeaveLedgerEntryRepository;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,6 +28,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -83,6 +86,11 @@ public class AttendanceRegularizationService {
                     "Attendance date " + request.attendanceDate() + " is not eligible for regularization (status: "
                             + dailyAttendance.getDetailStatus() + ")");
         }
+        if (regularizationRepository.existsByEmployeeIdAndAttendanceDateAndApprovalStatus(
+                employee.getId(), request.attendanceDate(), ApprovalStatus.PENDING)) {
+            throw new DuplicatePendingRegularizationException(
+                    "A regularization request for " + request.attendanceDate() + " is already pending approval");
+        }
 
         AttendanceRegularizationApplication application = new AttendanceRegularizationApplication(
                 employee, request.attendanceDate(), dailyAttendance, request.reasonCode(), request.remarks(),
@@ -93,9 +101,21 @@ public class AttendanceRegularizationService {
         return AttendanceRegularizationResponse.from(regularizationRepository.saveAndFlush(application));
     }
 
+    /**
+     * callerId is the specific employee this request was routed to (designatedApprover, resolved via
+     * SupervisorResolutionService at submission time) - and only that employee, full stop. HR_ADMIN/SUPER_ADMIN
+     * get broader READ access (see findAll()) so they can see every request across the organization, but acting
+     * on one (approve/reject) stays restricted to the actual designated approver - an admin browsing the
+     * all-requests view is not a substitute for the person whose sign-off the workflow requires.
+     */
     @Transactional
-    public AttendanceRegularizationResponse approve(Long id, RegularizationDecisionRequest decision) {
+    public AttendanceRegularizationResponse approve(Long id, RegularizationDecisionRequest decision, Long callerId) {
         AttendanceRegularizationApplication application = findOrThrow(id);
+        Employee designatedApprover = application.getDesignatedApprover();
+        boolean isDesignatedApprover = designatedApprover != null && designatedApprover.getId().equals(callerId);
+        if (!isDesignatedApprover) {
+            throw new AccessDeniedException("You are not the designated approver for regularization application " + id);
+        }
         if (application.getApprovalStatus() != ApprovalStatus.PENDING) {
             throw new BusinessRuleViolationException("Regularization application " + id + " has already been decided");
         }
@@ -165,5 +185,21 @@ public class AttendanceRegularizationService {
     private AttendanceRegularizationApplication findOrThrow(Long id) {
         return regularizationRepository.findById(id)
                 .orElseThrow(() -> new MasterDataNotFoundException("Attendance Regularization Application", id));
+    }
+
+    /** RegularizationApprovalQueuePage's metric cards/status filter - every request ever routed to this approver, any status, newest first. */
+    public List<AttendanceRegularizationResponse> findAllDecidedByApprover(Long approverId) {
+        return regularizationRepository.findByDesignatedApproverId(approverId).stream()
+                .sorted((a, b) -> b.getCreatedAt().compareTo(a.getCreatedAt()))
+                .map(AttendanceRegularizationResponse::from)
+                .toList();
+    }
+
+    /** HR_ADMIN/SUPER_ADMIN organization-wide visibility - every regularization request regardless of designated approver, newest first. View-only: acting on one still requires approve()'s designated-approver check. */
+    public List<AttendanceRegularizationResponse> findAll() {
+        return regularizationRepository.findAll().stream()
+                .sorted((a, b) -> b.getCreatedAt().compareTo(a.getCreatedAt()))
+                .map(AttendanceRegularizationResponse::from)
+                .toList();
     }
 }

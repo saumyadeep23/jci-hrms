@@ -17,8 +17,10 @@ import in.gov.jci.hrms.entity.LoanTypeCode;
 import in.gov.jci.hrms.entity.MovementLpcRecord;
 import in.gov.jci.hrms.entity.MovementOrder;
 import in.gov.jci.hrms.entity.MovementOrderType;
-import in.gov.jci.hrms.entity.PayScale;
+import in.gov.jci.hrms.entity.Cadre;
+import in.gov.jci.hrms.entity.GradeScaleMaster;
 import in.gov.jci.hrms.entity.RegionalOffice;
+import in.gov.jci.hrms.entity.RegularPayFixation;
 import in.gov.jci.hrms.entity.ScaleType;
 import in.gov.jci.hrms.entity.SessionType;
 import in.gov.jci.hrms.exception.BusinessRuleViolationException;
@@ -30,6 +32,7 @@ import in.gov.jci.hrms.repository.LeaveBalanceRepository;
 import in.gov.jci.hrms.repository.LeaveEntitlementBalanceRepository;
 import in.gov.jci.hrms.repository.LeaveTypeRepository;
 import in.gov.jci.hrms.repository.MovementLpcRecordRepository;
+import in.gov.jci.hrms.repository.RegularPayFixationRepository;
 import in.gov.jci.hrms.service.pdf.LastPayCertificatePdfGenerator;
 import in.gov.jci.hrms.service.pdf.PdfHeaderFooterHelper;
 import org.junit.jupiter.api.BeforeEach;
@@ -73,6 +76,8 @@ class LastPayCertificateServiceTest {
     private LeaveBalanceRepository leaveBalanceRepository;
     @Mock
     private PayrollComputationService payrollComputationService;
+    @Mock
+    private RegularPayFixationRepository regularPayFixationRepository;
 
     private LastPayCertificateService service;
     private Employee employee;
@@ -84,15 +89,19 @@ class LastPayCertificateServiceTest {
     void setUp() {
         service = new LastPayCertificateService(lpcRecordRepository, movementRecordRepository, employeeRepository,
                 employmentCategoryRepository, employeeLoanRepository, leaveTypeRepository, entitlementBalanceRepository,
-                leaveBalanceRepository, payrollComputationService, new LastPayCertificatePdfGenerator(new PdfHeaderFooterHelper()));
+                leaveBalanceRepository, payrollComputationService, regularPayFixationRepository,
+                new LastPayCertificatePdfGenerator(new PdfHeaderFooterHelper()));
 
         Department department = new Department("ENG", "Engineering");
         Designation designation = new Designation("Manager");
-        PayScale payScale = new PayScale(ScaleType.IDA, "E-2", new BigDecimal("40000"), new BigDecimal("80000"),
-                new BigDecimal("3.5"), true);
+        GradeScaleMaster gradeScale = new GradeScaleMaster("E-2", Cadre.EXECUTIVE, 2, false,
+                new BigDecimal("40000"), new BigDecimal("80000"));
+        gradeScale.setScaleType(ScaleType.IDA);
         employee = new Employee("EMP-001", "Asha", "Rao", "asha@example.com", LocalDate.of(2015, 1, 1), department, designation);
         ReflectionTestUtils.setField(employee, "id", 1L);
-        employee.setPayScale(payScale);
+        RegularPayFixation currentFixation = new RegularPayFixation(employee, gradeScale, new BigDecimal("45000.00"),
+                LocalDate.of(2015, 1, 1));
+        lenient().when(regularPayFixationRepository.findByEmployeeIdAndCurrentTrue(1L)).thenReturn(Optional.of(currentFixation));
 
         RegionalOffice fromOffice = new RegionalOffice("RO-A", "Kolkata RO", "West Bengal", CityClass.Y, true);
         RegionalOffice toOffice = new RegionalOffice("RO-B", "Mumbai RO", "Maharashtra", CityClass.X, true);

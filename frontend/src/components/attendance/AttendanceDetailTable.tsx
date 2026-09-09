@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Download, Printer } from 'lucide-react'
+import { Download, History, Printer } from 'lucide-react'
 import { apiClient } from '../../api/client'
 import { useAuth } from '../../auth/AuthContext'
 import { formatDate } from '../../lib/date'
 import { RegularizationModal } from './RegularizationModal'
-import { Card, EmptyState, ErrorState, LoadingState, SecondaryButton } from '../common/ui'
-import type { AttendanceDetailStatus, DailyAttendanceDetailResponse, LeaveLedgerEntryResponse } from '../../types/api'
+import { MyRegularizationRequestsModal } from './MyRegularizationRequestsModal'
+import { Badge, Card, EmptyState, ErrorState, LoadingState, SecondaryButton } from '../common/ui'
+import type { AttendanceDetailStatus, AttendanceRegularizationResponse, DailyAttendanceDetailResponse, LeaveLedgerEntryResponse } from '../../types/api'
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -126,6 +127,7 @@ export function AttendanceDetailTable() {
   const [year, setYear] = useState(now.getFullYear())
   const [month, setMonth] = useState(now.getMonth() + 1)
   const [regularizing, setRegularizing] = useState<DailyAttendanceDetailResponse | null>(null)
+  const [historyOpen, setHistoryOpen] = useState(false)
 
   const yearOptions = Array.from({ length: 4 }, (_, i) => now.getFullYear() - i)
 
@@ -144,11 +146,28 @@ export function AttendanceDetailTable() {
     queryFn: async () => (await apiClient.get<LeaveLedgerEntryResponse[]>('/leave-ledger-entries')).data,
   })
 
+  // Cross-referenced by attendanceDate against the aggregation grid below (client-side, same pattern as
+  // ledgerEntries above) rather than a hasPendingRegularisation/pendingRegularisationId field on
+  // DailyAttendanceDetailResponse itself - that response comes from POST .../aggregation/evaluate, a
+  // computed re-evaluation of the muster grid, not a per-row lookup this join would naturally attach to.
+  const { data: myRegularizations } = useQuery({
+    queryKey: ['attendance-regularization-mine'],
+    queryFn: async () => (await apiClient.get<AttendanceRegularizationResponse[]>('/v1/attendance/regularization/mine')).data,
+  })
+  const pendingRegularizationByDate = new Map((myRegularizations ?? []).filter((r) => r.approvalStatus === 'PENDING').map((r) => [r.attendanceDate, r]))
+  const approvedRegularizationByDate = new Map((myRegularizations ?? []).filter((r) => r.approvalStatus === 'APPROVED').map((r) => [r.attendanceDate, r]))
+
   const monthPrefix = `${year}-${String(month).padStart(2, '0')}`
   const concessionsUsed = data?.filter((r) => CONCESSION_STATUSES.includes(r.detailStatus)).length ?? 0
   const presentDays = data?.filter((r) => COARSE_PRESENT_STATUSES.includes(r.detailStatus)).length ?? 0
+  // Only AUTO_LATE_DEDUCTION rows count as an "attendance" debit here - summing abs(deltaDays) over
+  // every ledger entry that month (the previous bug) picked up unrelated credits too, e.g. a
+  // BASELINE_TAKEON opening-balance credit of +1063 days landing in the same month inflated the card
+  // to 1063.5 instead of the real 0.5-day late debit. Filtering by source (rather than just deltaDays <
+  // 0 and excluding EL_ENCASHMENT_DEBIT) also correctly excludes other real negative-delta sources that
+  // aren't attendance-driven (COMMUTED_LEAVE_HPL_DEBIT, EL_EOL_LAPSE_DEDUCTION, TERMINAL_ENCASHMENT).
   const leaveDebitsThisMonth = (ledgerEntries ?? [])
-    .filter((e) => e.entryDate.startsWith(monthPrefix))
+    .filter((e) => e.entryDate.startsWith(monthPrefix) && e.source === 'AUTO_LATE_DEDUCTION')
     .reduce((sum, e) => sum + Math.abs(e.deltaDays), 0)
 
   return (
@@ -204,6 +223,9 @@ export function AttendanceDetailTable() {
             <SecondaryButton onClick={() => window.print()} disabled={!data || data.length === 0}>
               <Printer size={14} /> Print
             </SecondaryButton>
+            <SecondaryButton onClick={() => setHistoryOpen(true)} className="no-print">
+              <History size={14} /> Regularization History
+            </SecondaryButton>
           </div>
         </div>
 
@@ -244,14 +266,21 @@ export function AttendanceDetailTable() {
                     </td>
                     <td className="py-2 pl-3 text-xs text-slate-500">{row.remarks ?? '—'}</td>
                     <td className="py-2 pl-3 no-print">
-                      {REGULARIZABLE_STATUSES.includes(row.detailStatus) && employeeId !== null && (
-                        <button
-                          type="button"
-                          onClick={() => setRegularizing(row)}
-                          className="rounded border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100"
-                        >
-                          Regularise
-                        </button>
+                      {approvedRegularizationByDate.has(row.date) ? (
+                        <Badge tone="success">Regularised</Badge>
+                      ) : pendingRegularizationByDate.has(row.date) ? (
+                        <Badge tone="warning">Pending Approval</Badge>
+                      ) : (
+                        REGULARIZABLE_STATUSES.includes(row.detailStatus) &&
+                        employeeId !== null && (
+                          <button
+                            type="button"
+                            onClick={() => setRegularizing(row)}
+                            className="rounded border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100"
+                          >
+                            Regularise
+                          </button>
+                        )
                       )}
                     </td>
                   </tr>
@@ -265,6 +294,8 @@ export function AttendanceDetailTable() {
       {regularizing && employeeId !== null && (
         <RegularizationModal employeeId={employeeId} row={regularizing} onClose={() => setRegularizing(null)} />
       )}
+
+      {historyOpen && <MyRegularizationRequestsModal onClose={() => setHistoryOpen(false)} />}
     </div>
   )
 }
