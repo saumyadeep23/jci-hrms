@@ -865,6 +865,8 @@ export type UploadCategory =
   | 'SERVICE_BOOK_SCAN'
   | 'APAR'
   | 'DISCIPLINARY'
+  | 'CPF_DISPUTE_ATTACHMENT'
+  | 'CPF_WITHDRAWAL_SUPPORTING_DOC'
   | 'OTHER'
 
 export interface DocumentUploadResponse {
@@ -1949,6 +1951,117 @@ export interface PayrollRunResponse {
   runType: string
   isMigrated: boolean
   createdAt: string
+}
+
+// --- Payroll Batches (unified Payroll Computation Engine - PayrollBatchController) ---
+
+export type PayrollBatchStatus = 'DRAFT' | 'CALCULATED' | 'HR_FINALIZED' | 'FINANCE_APPROVED' | 'REJECTED_TO_HR' | 'DISBURSED' | 'CANCELLED'
+export type PayrollBatchType = 'REGULAR' | 'SUPPLEMENTARY'
+
+export interface PayrollBatchResponse {
+  id: number
+  batchNo: string
+  salMonth: number
+  salYear: number
+  financialYear: string
+  status: PayrollBatchStatus
+  batchType: PayrollBatchType
+  payDate: string | null
+  totalEmployees: number
+  totalGross: number
+  totalDeductions: number
+  totalNet: number
+}
+
+export interface PayrollHeadLineResponse {
+  headCount: number
+  shortName: string
+  description: string
+  category: 'EARNING' | 'DEDUCTION' | 'STATUTORY'
+  amount: number
+}
+
+export interface PayrollMonthlyHeadItemResponse {
+  headCount: number
+  amount: number
+}
+
+export interface PayrollMonthlyRecordResponse {
+  tranId: number
+  empCode: string
+  employeeName: string
+  month: number
+  year: number
+  basicPay: number
+  grossAmount: number
+  totalDeductions: number
+  netAmount: number
+  salaryHeld: boolean
+  leaveEncashmentAmount: number
+  tdsAmount: number
+  tdsOverridden: boolean
+  headItems: PayrollMonthlyHeadItemResponse[]
+  fullHeadLines: PayrollHeadLineResponse[]
+}
+
+export interface PayrollBatchDetailsResponse {
+  batch: PayrollBatchResponse
+  records: PayrollMonthlyRecordResponse[]
+}
+
+export interface EditPayrollLineDto {
+  headCount: number
+  newAmount: number
+  changeReason: string
+}
+
+export interface PayrollEditResponse {
+  tranId: number
+  changedHeads: PayrollHeadLineResponse[]
+  grossAmount: number
+  totalDeductions: number
+  netAmount: number
+}
+
+export type PayrollReportType =
+  | 'SUMMARY_SHEET'
+  | 'CPF_SCHEDULE'
+  | 'INCOME_TAX_SCHEDULE'
+  | 'NPS_SCHEDULE'
+  | 'PTAX_SCHEDULE'
+  | 'COOPERATIVE_SCHEDULE'
+  | 'RECREATION_CLUB_SCHEDULE'
+
+export interface TabularReportResponse {
+  columns: string[]
+  rows: Record<string, unknown>[]
+  totalElements: number
+}
+
+// --- ESS Salary Slips ---
+
+export interface EssSalarySlipSummaryResponse {
+  tranId: number
+  month: number
+  year: number
+  batchNo: string
+  grossAmount: number
+  totalDeductions: number
+  netAmount: number
+  salaryHeld: boolean
+}
+
+export interface EssSalarySlipDetailResponse {
+  tranId: number
+  empCode: string
+  employeeName: string
+  designation: string | null
+  month: number
+  year: number
+  grossAmount: number
+  totalDeductions: number
+  netAmount: number
+  headLines: PayrollHeadLineResponse[]
 }
 
 // --- CPF ledger ---
@@ -3130,6 +3243,7 @@ export type CpfLedgerEntryType =
   | 'INTERIM_SETTLEMENT_INTEREST'
   | 'FINAL_SETTLEMENT'
 
+/** Mirrors v_member_cpf_passbook (V80) - remarks is deliberately not included, the passbook display never shows it. */
 export interface CpfTrustLedgerEntryResponse {
   id: number
   employeeId: number
@@ -3137,6 +3251,8 @@ export interface CpfTrustLedgerEntryResponse {
   salMonth: number | null
   salYear: number | null
   valueDate: string
+  /** "Mon-YYYY", e.g. "Apr-2024" - derived from salMonth/salYear, falling back to valueDate. */
+  displayPeriod: string
   entryType: CpfLedgerEntryType
   eeShareCredit: number
   eeShareDebit: number
@@ -3147,10 +3263,24 @@ export interface CpfTrustLedgerEntryResponse {
   interestCredit: number
   totalCredit: number
   totalDebit: number
+  /** Diversion / Loan Sanction this row - Refundable Loan (debits EE) and Non-Refundable Withdrawal (head-wise). */
+  sancCpfLoan: number
+  sancNrwEe: number
+  sancNrwEr: number
+  sancNrwVpf: number
+  /** Loan Repayment this row - both credited to EE, see CpfLedgerSyncService. */
+  loanRepayPrincipal: number
+  loanRepayInterest: number
   runningEeBalance: number
   runningErBalance: number
   runningVpfBalance: number
   runningTotalBalance: number
+  /** Outstanding Refundable Loan balance after this row. */
+  runningLoanCpfBalance: number
+  /** Cumulative Non-Refundable Withdrawals taken from each fund to date (never reduced). */
+  runningNrwEeBalance: number
+  runningNrwErBalance: number
+  runningNrwVpfBalance: number
   payrollRunId: number | null
   transferId: number | null
   loanId: number | null
@@ -3158,7 +3288,6 @@ export interface CpfTrustLedgerEntryResponse {
   rateApplied: number | null
   rateSourceFinYear: string | null
   referenceDocNo: string | null
-  remarks: string | null
   createdAt: string
 }
 
@@ -3171,10 +3300,220 @@ export interface CpfPassbookResponse {
   ledgerBalance: number
   accruedInterestFytd: number
   effectiveTotalCorpus: number
+  /** Current Outstanding Refundable Loan Balance, across all financial years - 0 if no CPF Trust loan has ever been disbursed. */
+  outstandingLoanBalance: number
   rateApplied: number
   rateSourceFinYear: string
   isProvisionalRate: boolean
   provisionalNotice: string | null
+}
+
+// ================================================================================================
+// CPF Passbook V2 - EPS display + Transaction Dispute (Parts 4-16/40 of the module spec).
+// GET /api/v1/ess/cpf/passbook/... and /api/v1/ess/cpf/disputes/... - always employeeId-from-JWT,
+// never a client-supplied employeeId param. See CpfSelfServicePassbookController/CpfSelfServiceDisputeController.
+// ================================================================================================
+
+export interface CpfContributionSummaryResponse {
+  employeeContribution: number
+  employerContribution: number
+  epsContribution: number
+  vpfContribution: number
+  totalContribution: number
+}
+
+/** GET /api/v1/ess/cpf/passbook/summary?finYear= */
+export interface CpfPassbookSummaryResponse {
+  finYear: string
+  auditedBalance: number
+  accruedInterest: number
+  effectiveCorpus: number
+  outstandingLoan: number
+  rateApplied: number
+  rateSourceFinYear: string
+  isProvisionalRate: boolean
+  provisionalNotice: string | null
+  contributionSummary: CpfContributionSummaryResponse
+}
+
+export type CpfDisputeCategory =
+  | 'EMPLOYEE_CONTRIBUTION'
+  | 'EMPLOYER_CONTRIBUTION'
+  | 'EPS_CONTRIBUTION'
+  | 'VPF_CONTRIBUTION'
+  | 'INTEREST'
+  | 'LOAN_SANCTION'
+  | 'LOAN_REPAYMENT'
+  | 'WITHDRAWAL'
+  | 'TRANSACTION_MISSING'
+  | 'BALANCE'
+  | 'TRANSACTION_DATE'
+  | 'OTHER'
+
+/**
+ * OPEN -> UNDER_REVIEW -> RESOLVED | REJECTED, OPEN -> UNDER_REVIEW -> CLARIFICATION_REQUIRED -> UNDER_REVIEW
+ * -> (RESOLVED|REJECTED), OPEN -> WITHDRAWN. RESOLVED/REJECTED/WITHDRAWN are terminal.
+ */
+export type CpfDisputeStatus = 'OPEN' | 'UNDER_REVIEW' | 'CLARIFICATION_REQUIRED' | 'RESOLVED' | 'REJECTED' | 'WITHDRAWN'
+
+/** Part 5.2/40 - the small "does this transaction have a dispute" badge, never the full dispute record. */
+export interface CpfDisputeBadgeResponse {
+  disputeId: number
+  disputeNumber: string
+  status: CpfDisputeStatus
+}
+
+/** Part 5 compact transaction row - GET /api/v1/ess/cpf/passbook/transactions. */
+export interface CpfPassbookTransactionSummaryResponse {
+  id: number
+  transactionDate: string
+  displayPeriod: string
+  transactionType: CpfLedgerEntryType
+  displayAmount: number
+  isCredit: boolean
+  dispute: CpfDisputeBadgeResponse | null
+}
+
+/** Part 5.1/26 full transaction detail - GET /api/v1/ess/cpf/passbook/transactions/{id}. */
+export interface CpfPassbookTransactionDetailResponse {
+  id: number
+  finYear: string
+  transactionDate: string
+  postingDate: string
+  displayPeriod: string
+  transactionType: CpfLedgerEntryType
+  source: string
+  referenceDocNo: string | null
+  contribution: {
+    employeeCpf: number
+    employerCpf: number
+    eps: number
+    vpf: number
+    total: number
+  }
+  adjustment: {
+    employeeDebit: number
+    employerDebit: number
+    vpfDebit: number
+    loanSanctioned: number
+    loanPrincipalRepaid: number
+    loanInterestRepaid: number
+    nonRefundableWithdrawal: number
+  }
+  balance: {
+    employeeBalance: number
+    employerBalance: number
+    vpfBalance: number
+    totalBalance: number
+  }
+  audit: {
+    createdAt: string
+    sourceModule: string
+  }
+  isProvisionalRate: boolean
+  rateApplied: number | null
+  rateSourceFinYear: string | null
+  dispute: CpfDisputeBadgeResponse | null
+}
+
+/** POST /api/v1/ess/cpf/disputes - attachmentS3Key/attachmentOriginalFilename come from a prior
+ * POST /api/v1/documents/upload (category=CPF_DISPUTE_ATTACHMENT) call, never a raw file upload here. */
+export interface CpfDisputeCreateRequest {
+  cpfLedgerTransactionId: number
+  disputeCategory: CpfDisputeCategory
+  employeeRemarks: string
+  attachmentS3Key: string | null
+  attachmentOriginalFilename: string | null
+}
+
+/** Employee-facing dispute view - deliberately omits reviewer-internal fields (Part 40). */
+export interface CpfDisputeResponse {
+  id: number
+  disputeNumber: string
+  cpfLedgerTransactionId: number
+  disputeCategory: CpfDisputeCategory
+  status: CpfDisputeStatus
+  employeeRemarks: string
+  attachmentOriginalFilename: string | null
+  raisedAt: string
+  clarificationRequest: string | null
+  employeeResponse: string | null
+  resolutionRemarks: string | null
+  resolvedAt: string | null
+  rejectedAt: string | null
+  withdrawnAt: string | null
+  version: number
+}
+
+export interface CpfDisputeClarificationResponseRequest {
+  response: string
+}
+
+/** One row of "My Disputes" or the admin dispute queue (Part 12). */
+export interface CpfDisputeSummaryResponse {
+  id: number
+  disputeNumber: string
+  employeeId: number
+  employeeCode: string
+  employeeName: string
+  cpfLedgerTransactionId: number
+  disputeCategory: CpfDisputeCategory
+  status: CpfDisputeStatus
+  raisedAt: string
+  assignedToEmployeeId: number | null
+}
+
+/** Full reviewer-facing dispute view (Part 12) - includes reviewer-internal fields CpfDisputeResponse omits. */
+export interface CpfDisputeAdminResponse {
+  id: number
+  disputeNumber: string
+  employeeId: number
+  employeeCode: string
+  employeeName: string
+  cpfLedgerTransactionId: number
+  disputeCategory: CpfDisputeCategory
+  status: CpfDisputeStatus
+  employeeRemarks: string
+  attachmentOriginalFilename: string | null
+  attachmentS3Key: string | null
+  raisedByEmployeeId: number
+  raisedAt: string
+  assignedToEmployeeId: number | null
+  assignedAt: string | null
+  reviewerRemarks: string | null
+  clarificationRequest: string | null
+  employeeResponse: string | null
+  resolutionRemarks: string | null
+  resolvedByEmployeeId: number | null
+  resolvedAt: string | null
+  rejectedByEmployeeId: number | null
+  rejectedAt: string | null
+  withdrawnAt: string | null
+  version: number
+}
+
+export interface CpfDisputeAssignRequest {
+  assigneeEmployeeId: number
+  expectedVersion: number
+}
+
+export interface CpfDisputeStartReviewRequest {
+  expectedVersion: number
+}
+
+/** POST .../resolve, .../reject, .../request-clarification - remarks required for all three. */
+export interface CpfDisputeReviewActionRequest {
+  remarks: string
+  expectedVersion: number
+}
+
+/** One row of a dispute's status-change timeline (Part 41) - built off the existing generic audit_logs table. */
+export interface CpfDisputeHistoryEntryResponse {
+  action: string
+  performedBy: string | null
+  timestamp: string
+  previousState: string | null
+  newState: string | null
 }
 
 export type CpfInterimSettlementType = 'SUPERANNUATION' | 'RESIGNATION' | 'DEATH' | 'TRANSFER_OUT'
@@ -3212,6 +3551,13 @@ export interface CpfStatutoryInterestRateResponse {
 }
 
 // --- CPF Trust Members' List (CpfTrustMemberController) - primary identifiers are cpfAcNo and uanNo. ---
+export type CpfSettlementStatus = 'NOT_APPLICABLE' | 'PENDING' | 'IN_PROCESS' | 'OVERDUE' | 'SETTLED'
+
+/** One row of the CPF Trust Members' List - GET /v1/payroll/trust/members. cpfBalance/totalPayable are
+ * always server-computed (eeBalance+vpfBalance+erBalance, and +accruedInterest for the latter), never
+ * independently entered - see CpfTrustMemberDirectoryService.toResponse(). settlementStatus/settlementDueDate/
+ * settlementLagLabel/settlementLagDays are likewise always derived at read time (CpfSettlementCalculator),
+ * never stored, so they move forward automatically with today's date. */
 export interface CpfTrustMemberResponse {
   employeeId: number
   employeeCode: string
@@ -3219,15 +3565,59 @@ export interface CpfTrustMemberResponse {
   cpfAcNo: string
   uanNo: string | null
   status: string
-  departmentName: string | null
-  designationName: string | null
-  /** Only populated once the employee has actually separated (see the backend's own status-gating comment) - null for active members. */
+  isSeparated: boolean
   separationDate: string | null
-  cpfSettlementStatus: string | null
-  /** Only populated once cpfSettlementStatus reaches DISBURSED. */
-  cpfSettlementDate: string | null
-  /** separationDate -> cpfSettlementDate gap in days - the "settled after separation" backlog this list exists to surface. Null until both dates are known. */
+
+  eeBalance: number
+  vpfBalance: number
+  erBalance: number
+  cpfBalance: number
+  /** Current-FY interest not yet posted by an annual interest run - 0 once posted (already folded into the balances above), or if no statutory rate is notified for this FY yet. */
+  accruedInterest: number
+  totalPayable: number
+
+  /** Raw TerminalSettlementStatus (DRAFT/AUDITED/APPROVED/DISBURSED), or null if no terminal settlement exists yet. */
+  rawTerminalSettlementStatus: string | null
+  settlementStatus: CpfSettlementStatus
+  settlementDueDate: string | null
+  settlementDate: string | null
+  /** "Due in X days" / "Due today" / "X days overdue" / "Settled" / "-". */
+  settlementLagLabel: string
   settlementLagDays: number | null
+}
+
+/** GET /v1/payroll/trust/members/summary - the KPI strip, always computed against the full membership (ignores the table's current search/filter). */
+export interface CpfTrustMemberSummaryResponse {
+  totalMembers: number
+  activeAccounts: number
+  separatedMembers: number
+  pendingSettlement: number
+  overdueSettlement: number
+  uanMissing: number
+  totalCpfBalance: number
+}
+
+export interface UpdateUanRequest {
+  uanNo: string
+}
+
+export type CpfEpsEligibilityStatus = 'ELIGIBLE' | 'NOT_ELIGIBLE' | 'REVIEW_REQUIRED'
+
+/** GET /v1/payroll/trust/members/{employeeId}/eps-eligibility - a placeholder-rule eligibility check, not a confirmed legal determination; see the backend service's own javadoc. */
+export interface CpfEpsEligibilityResponse {
+  employeeId: number
+  fullName: string
+  cpfAcNo: string
+  uanNo: string | null
+  dateOfBirth: string | null
+  dateOfJoining: string | null
+  dateOfSeparation: string | null
+  epsMember: boolean
+  eligibleServiceLabel: string
+  eligibleServiceDays: number
+  pensionableServiceLabel: string
+  eligibility: CpfEpsEligibilityStatus
+  eligibilityBasis: string
 }
 
 // --- CPF Trust: Loan/Withdrawal Origination (CpfLoanController) ---
@@ -3265,6 +3655,10 @@ export interface CpfLoanSanctionRequest {
   totalInstallments: number
   /** Number of installments the total interest is spread over - separate from totalInstallments (the principal schedule), since Head 30 then Head 31 recovery runs sequentially, not in parallel. */
   interestInstallments: number
+  /** Required (and must sum to sanctionedAmount) only for NON_REFUNDABLE_WITHDRAWAL - ignored for REFUNDABLE_LOAN, which always debits EE only. */
+  sancNrwEe?: number | null
+  sancNrwEr?: number | null
+  sancNrwVpf?: number | null
 }
 
 export interface CpfLoanApplicationResponse {
@@ -3280,6 +3674,9 @@ export interface CpfLoanApplicationResponse {
   sanctionedAmount: number
   sanctionOrderNo: string | null
   sanctionDate: string | null
+  sancNrwEe: number
+  sancNrwEr: number
+  sancNrwVpf: number
   baseCpfRate: number
   interestRate: number
   totalInterestAmount: number
@@ -3298,6 +3695,8 @@ export interface CpfLoanApplicationResponse {
   rejectionRemarks: string | null
   disbursedAt: string | null
   createdAt: string
+  /** Part 7/38 - the cpf_application.id this loan was bridged from, when it originated through the rule-engine flow. Null for a loan applied directly through the legacy CpfLoanController. */
+  cpfApplicationId: string | null
 }
 
 // --- CPF Loan Settlement (direct out-of-payroll cash/instrument settlement - CpfLoanController) ---
@@ -3349,4 +3748,705 @@ export interface CpfLoanSettlementResponse {
   interestRebateAmount: number
   remarks: string | null
   createdAt: string
+}
+
+// --- CPF Trust: DB-driven rule-engine withdrawal/loan origination (CpfApplicationController) - apply ->
+// sanction -> disburse, against whichever APPROVED, currently-effective rule version is configured for the
+// chosen purpose. Deliberately separate from the legacy CpfLoanController flow above (cpf_application, not
+// cpf_loan_applications) - a refundable purpose's successful disbursement bridges into exactly one linked
+// CpfLoanApplication (see CpfLoanApplicationResponse.cpfApplicationId) so the existing repayment/recovery/
+// settlement machinery activates for it automatically. ---
+
+export interface CpfWithdrawalPurposeResponse {
+  id: string
+  code: string
+  name: string
+  description: string | null
+  typeCode: string
+  active: boolean
+}
+
+// CpfRuleDocumentConfig (documentName/mandatory/allowedMimeTypes/maxSizeKb) is already declared further
+// below (the admin rule-config shape) - reused here for the eligibility response's own requiredDocuments
+// list rather than redeclaring it, since a mandatory document's documentName must be echoed back verbatim
+// in CpfApplicationDocumentSubmission.documentName for it to be recognized as satisfied.
+
+/** Task 4 - one evaluated ceiling component (CeilingComponentResponse), structured sibling of calculationTrace. */
+export interface CpfCeilingComponent {
+  componentName: string
+  sourceMetric: 'ELIGIBLE_BALANCE' | 'BASIC_PLUS_DA' | 'PROPERTY_COST' | 'OUTSTANDING_LOAN' | 'PAYROLL_DEDUCTION_CAPACITY' | 'FIXED_AMOUNT'
+  calculatedValue: number
+}
+
+/** Task 4 - one head's configured debit priority + projected debit amount (HeadAllocationResponse). */
+export interface CpfHeadAllocation {
+  headCode: string
+  headName: string
+  debitPriority: number
+  previewDebitAmount: number
+}
+
+/** Task 4 - non-mutating repayment preview (RepaymentPreviewResponse); principal-first, interest only
+ * starts at interestPhaseStartInstallment (1-based). */
+export interface CpfRepaymentPreview {
+  tenureMonths: number
+  principalAmount: number
+  monthlyPrincipalInstallment: number
+  principalInstallmentCount: number
+  interestInstallmentCount: number
+  interestPhaseStartInstallment: number
+  monthlyInterestInstallment: number
+  totalInterest: number
+  totalRecovery: number
+}
+
+export interface CpfApplicationEligibilityResponse {
+  purposeCode: string
+  ruleVersionId: string
+  ruleVersionTag: string
+  eligible: boolean
+  eligibilityReason: string
+  totalEligibleBalance: number
+  eligibleAmount: number
+  serviceEligible: boolean
+  serviceEligibilityReason: string
+  frequencyEligible: boolean
+  frequencyReason: string
+  calculationTrace: string[]
+  requiredDocuments: CpfRuleDocumentConfig[]
+  ceilingComponents: CpfCeilingComponent[]
+  headAllocation: CpfHeadAllocation[]
+  repaymentPreview: CpfRepaymentPreview | null
+  carriesRepaymentSchedule: boolean
+  minTenureMonths: number | null
+  maxTenureMonths: number | null
+  defaultTenureMonths: number | null
+}
+
+/** A document the applicant actually submitted - documentName must match one of requiredDocuments' own names exactly; s3Key/originalFilename come from a prior POST /v1/documents/upload (category=CPF_WITHDRAWAL_SUPPORTING_DOC). */
+export interface CpfApplicationDocumentSubmission {
+  documentName: string
+  s3Key: string
+  originalFilename: string
+}
+
+export interface CpfApplicationRequest {
+  employeeCode: string
+  purposeCode: string
+  appliedAmount: number
+  basicPlusDa?: number | null
+  propertyCost?: number | null
+  payrollDeductionCapacity?: number | null
+  submittedDocuments: CpfApplicationDocumentSubmission[]
+  /** Feeds the OUTSTANDING_LOAN ceiling metric - only HOUSING_LOAN_REPAYMENT's rule reads this today. */
+  outstandingLoan?: number | null
+}
+
+export type CpfApplicationStatus = 'APPLIED' | 'SANCTIONED' | 'DISBURSED' | 'REJECTED' | 'CLOSED'
+
+export interface CpfApplicationResponse {
+  id: string
+  applicationNumber: string
+  employeeCode: string
+  purposeCode: string
+  ruleVersionId: string
+  ruleVersionTag: string
+  status: CpfApplicationStatus
+  appliedAmount: number
+  eligibleAmount: number
+  sanctionedAmount: number | null
+  tenureMonths: number | null
+  calculatedEmi: number | null
+  calculationTrace: string
+  submittedDocuments: string
+  createdAt: string
+  sanctionedAt: string | null
+  disbursedAt: string | null
+  /** The cpf_loan_applications.id this application's disbursement bridged into, when its purpose is refundable. Null for non-refundable withdrawals/final settlements. */
+  linkedLoanId: number | null
+}
+
+export interface CpfApplicationSanctionRequest {
+  sanctionedAmount: number
+  tenureMonths?: number | null
+  basicPlusDa?: number | null
+  propertyCost?: number | null
+  payrollDeductionCapacity?: number | null
+  outstandingLoan?: number | null
+}
+
+// --- CPF Interest Management (CpfInterestRunController) - the admin-controlled Calculate -> Approve/Post
+// -> Reverse -> Recalculate workflow for year-end ANNUAL_INTEREST. See CpfInterestRunService's own javadoc. ---
+export type CpfInterestRunScope = 'ALL_MEMBERS' | 'SELECTED_MEMBER'
+export type CpfInterestRunStatus = 'CALCULATED' | 'POSTED' | 'REVERSED' | 'FAILED'
+
+/** One row of GET /interest/runs/years - the FY dashboard (Part 6/39 of the module spec). */
+export interface CpfInterestFinancialYearStatusResponse {
+  finYear: string
+  configuredRate: number | null
+  calculationBasisAvailable: boolean
+  fullYearDataAvailable: boolean
+  activeRunId: number | null
+  status: CpfInterestRunStatus | null
+  postingAllowed: boolean
+  dependencyBlockedReason: string | null
+  membersProcessed: number
+  totalInterestPosted: number
+  postedByEmployeeId: number | null
+  postedAt: string | null
+}
+
+export interface CpfInterestCalculateRequest {
+  finYear: string
+  scope: CpfInterestRunScope
+  employeeId: number | null
+  interestOrderNo: string
+  interestOrderDate: string
+}
+
+export interface CpfInterestMemberBreakdown {
+  employeeId: number
+  employeeCode: string
+  employeeName: string
+  openingBalance: number
+  totalContributions: number
+  totalWithdrawals: number
+  eeInterest: number
+  erInterest: number
+  vpfInterest: number
+  totalInterest: number
+  projectedClosingBalance: number
+  dataReviewRequired: boolean
+  dataReviewReason: string | null
+  legacyAnomalyWarning: boolean
+  legacyAnomalyMessage: string | null
+}
+
+export interface CpfInterestCalculationPreviewResponse {
+  runId: number
+  finYear: string
+  scope: CpfInterestRunScope
+  interestRate: number
+  memberCount: number
+  totalOpeningBalance: number
+  totalContributions: number
+  totalWithdrawals: number
+  totalEeInterest: number
+  totalErInterest: number
+  totalVpfInterest: number
+  totalStatutoryInterest: number
+  dataReviewRequired: boolean
+  members: CpfInterestMemberBreakdown[]
+}
+
+export interface CpfAnnualInterestRunResponse {
+  id: number
+  finYear: string
+  scope: CpfInterestRunScope
+  memberEmployeeId: number | null
+  declaredInterestRate: number
+  interestOrderNo: string
+  interestOrderDate: string
+  runDate: string
+  totalMembersProcessed: number
+  totalInterestCreditedEe: number
+  totalInterestCreditedEr: number
+  totalInterestCreditedVpf: number
+  status: CpfInterestRunStatus
+  dataReviewRequired: boolean
+  calculatedByEmployeeId: number | null
+  calculatedAt: string | null
+  postedByEmployeeId: number | null
+  postedAt: string | null
+  reversedByEmployeeId: number | null
+  reversedAt: string | null
+  remarks: string | null
+}
+
+// --- CPF Trust Loan & Advances rule engine (CpfWithdrawalRuleController/CpfApplicationController) - the
+// DRAFT -> PENDING_VERIFICATION -> PENDING_APPROVAL -> APPROVED workflow driving withdrawal eligibility/
+// ceiling calculation. Ids are UUID strings (this schema predates this app's usual Long/BIGSERIAL
+// convention - see CpfHeadMaster's own backend javadoc). ---
+export type CpfRuleStatus = 'DRAFT' | 'PENDING_VERIFICATION' | 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'SUPERSEDED' | 'EXPIRED' | 'REQUIRES_CONFIRMATION'
+export type CpfFrequencyScope = 'SERVICE' | 'FINANCIAL_YEAR' | 'CALENDAR_YEAR' | 'ROLLING_PERIOD' | 'NONE'
+export type CpfRepaymentCreditMethod = 'ORIGINAL_DEBIT_HEAD' | 'CONFIGURED_PRIORITY' | 'PROPORTIONAL' | 'SPECIFIC_HEAD' | 'OTHER_TRUST_RULE'
+export type CpfCeilingSourceMetric = 'ELIGIBLE_BALANCE' | 'BASIC_PLUS_DA' | 'PROPERTY_COST' | 'OUTSTANDING_LOAN' | 'PAYROLL_DEDUCTION_CAPACITY' | 'FIXED_AMOUNT'
+export type CpfCeilingOperator = 'MULTIPLY' | 'PERCENTAGE' | 'FIXED'
+
+export interface CpfWithdrawalTypeResponse {
+  id: string
+  code: string
+  name: string
+  refundable: boolean
+  settlement: boolean
+  active: boolean
+}
+
+export interface CpfWithdrawalPurposeResponse {
+  id: string
+  code: string
+  name: string
+  description: string | null
+  typeCode: string
+  active: boolean
+}
+
+export interface CpfHeadMasterResponse {
+  id: string
+  code: string
+  name: string
+  classification: string
+  interestBearing: boolean
+  withdrawalAllowed: boolean
+  active: boolean
+}
+
+export interface CpfRuleHeadConfig {
+  headCode: string
+  eligible: boolean
+  debitPriority: number
+  recreditPriority: number
+}
+
+export interface CpfRuleCeilingConfig {
+  componentName: string
+  sourceMetric: CpfCeilingSourceMetric
+  operator: CpfCeilingOperator
+  factorValue: number
+  displayOrder: number
+}
+
+export interface CpfRuleDocumentConfig {
+  documentName: string
+  mandatory: boolean
+  allowedMimeTypes?: string | null
+  maxSizeKb?: number | null
+}
+
+export interface CpfWithdrawalRuleVersionRequest {
+  purposeCode: string
+  versionTag: string
+  effectiveFrom: string
+  changeReason: string
+  minServiceMonths: number
+  includePreviousService: boolean
+  allowBreakInService: boolean
+  frequencyScope: CpfFrequencyScope
+  maxOccurrences: number
+  maxActiveConcurrency: number
+  balanceRetentionPct: number | null
+  repaymentCreditMethod: CpfRepaymentCreditMethod
+  minTenureMonths: number | null
+  maxTenureMonths: number | null
+  defaultTenureMonths: number | null
+  interestRateAnnual: number | null
+  interestMethod: string | null
+  allowPrepayment: boolean | null
+  allowConversion: boolean | null
+  payrollCapType: string | null
+  taxRuleReference: string | null
+  taxServiceThresholdMonths: number | null
+  workflowDefinitionCode: string | null
+  heads: CpfRuleHeadConfig[]
+  ceilings: CpfRuleCeilingConfig[]
+  documents: CpfRuleDocumentConfig[]
+}
+
+export interface CpfWithdrawalRuleVersionResponse {
+  id: string
+  purposeCode: string
+  versionTag: string
+  status: CpfRuleStatus
+  effectiveFrom: string
+  effectiveTo: string | null
+  approvalReference: string | null
+  changeReason: string
+  createdBy: string
+  verifiedBy: string | null
+  approvedBy: string | null
+  approvedAt: string | null
+  minServiceMonths: number
+  includePreviousService: boolean
+  allowBreakInService: boolean
+  frequencyScope: CpfFrequencyScope
+  maxOccurrences: number
+  maxActiveConcurrency: number
+  balanceRetentionPct: number
+  repaymentCreditMethod: CpfRepaymentCreditMethod
+  minTenureMonths: number | null
+  maxTenureMonths: number | null
+  defaultTenureMonths: number | null
+  interestRateAnnual: number | null
+  interestMethod: string | null
+  payrollCapType: string
+  taxRuleReference: string | null
+  taxServiceThresholdMonths: number | null
+  workflowDefinitionCode: string
+}
+
+export interface CpfRuleSimulatorRequest {
+  purposeCode: string
+  ruleVersionId?: string | null
+  employeeCode?: string | null
+  headABalance?: number | null
+  headBBalance?: number | null
+  headCBalance?: number | null
+  basicPlusDa?: number | null
+  propertyCost?: number | null
+  existingPayrollDeductions?: number | null
+  requestedAmount?: number | null
+  loanTenureMonths?: number | null
+}
+
+export interface CpfRuleSimulatorResponse {
+  ruleVersionId: string
+  ruleVersionTag: string
+  ruleStatus: string
+  serviceEligible: boolean
+  serviceEligibilityReason: string
+  frequencyEligible: boolean
+  frequencyReason: string
+  totalEligibleBalance: number
+  finalEligibleAmount: number
+  debitAllocationByHead: Record<string, number>
+  projectedEmi: number | null
+  taxLikely: boolean
+  calculationTrace: string[]
+}
+
+export interface CpfApplicationEligibilityResponse {
+  purposeCode: string
+  ruleVersionId: string
+  ruleVersionTag: string
+  eligible: boolean
+  eligibilityReason: string
+  totalEligibleBalance: number
+  eligibleAmount: number
+  serviceEligible: boolean
+  serviceEligibilityReason: string
+  frequencyEligible: boolean
+  frequencyReason: string
+  calculationTrace: string[]
+}
+
+export interface CpfApplicationResponse {
+  id: string
+  applicationNumber: string
+  employeeCode: string
+  purposeCode: string
+  ruleVersionId: string
+  ruleVersionTag: string
+  status: 'APPLIED' | 'SANCTIONED' | 'DISBURSED' | 'REJECTED' | 'CLOSED'
+  appliedAmount: number
+  eligibleAmount: number
+  sanctionedAmount: number | null
+  tenureMonths: number | null
+  calculatedEmi: number | null
+  calculationTrace: string
+  createdAt: string
+  sanctionedAt: string | null
+  disbursedAt: string | null
+}
+
+// ---------------------------------------------------------------------------
+// JCIECCS (JCI Employees' Co-Operative Credit Society) - backend controllers:
+// JciEccsMemberController, JciEccsLoanController, JciEccsPayrollBatchController,
+// JciEccsMigrationController. Field names/enums mirror the backend DTOs exactly.
+// ---------------------------------------------------------------------------
+
+export type JciEccsLoanProductCode = 'TERM' | 'EMERGENCY'
+export type JciEccsMembershipStatus = 'ACTIVE' | 'SUSPENDED' | 'CLOSED'
+export type JciEccsLoanStatus = 'PENDING' | 'ACTIVE' | 'RESTRUCTURED' | 'CLOSED' | 'DEFAULTED' | 'WRITTEN_OFF'
+export type JciEccsScheduleStatus = 'FUTURE' | 'DUE' | 'PARTIAL' | 'PAID' | 'OVERDUE' | 'RESTRUCTURED' | 'WAIVED'
+export type JciEccsDebitStatus = 'PENDING_DEBIT' | 'DEBIT_SUCCESS' | 'DEBIT_PARTIAL' | 'DEBIT_FAILED' | 'REVERSED'
+export type JciEccsCollectionBatchStatus = 'LOCKED' | 'PROCESSED' | 'REOPENED'
+
+export interface JciEccsMemberResponse {
+  id: number
+  employeeId: number
+  employeeCode: string | null
+  memberName: string | null
+  placeOfPosting: string | null
+  membershipCode: string
+  membershipDate: string
+  membershipStatus: JciEccsMembershipStatus
+  shareBalance: number
+  fundBalance: number
+  securityBalance: number
+  thriftMonthlyAmount: number
+}
+
+/** PUT /api/jcieccs/members/{id}/status - remarks required server-side for SUSPENDED/CLOSED (Bye-laws 15/16). */
+export interface JciEccsMemberStatusChangeRequest {
+  status: JciEccsMembershipStatus
+  effectiveDate: string
+  remarks?: string | null
+}
+
+export interface JciEccsLoanResponse {
+  id: number
+  loanIssueId: string
+  memberId: number
+  productCode: string
+  sanctionDate: string
+  disbursementDate: string
+  disbursementCycleCode: string
+  sanctionedAmount: number
+  disbursedAmount: number
+  tenureMonths: number
+  annualInterestRate: number
+  monthlyPrincipalInstallment: number
+  outstandingPrincipal: number
+  status: JciEccsLoanStatus
+  parentLoanId: number | null
+  restructuringCount: number
+  topupCount: number
+}
+
+export interface JciEccsLoanScheduleResponse {
+  id: number
+  installmentNo: number
+  cycleCode: string
+  openingPrincipal: number
+  principalDue: number
+  interestDue: number
+  totalDue: number | null
+  principalPaid: number
+  interestPaid: number
+  totalPaid: number | null
+  principalOutstanding: number
+  status: JciEccsScheduleStatus
+}
+
+export interface JciEccsLoanCreateRequest {
+  employeeCode: string
+  productCode: JciEccsLoanProductCode
+  sanctionedAmount: number
+  tenureMonths?: number | null
+  applicationDate: string
+  sanctionDate: string
+  disbursementDate: string
+}
+
+export interface JciEccsRestructureRequest {
+  tenureMonths: number
+  effectiveDate: string
+}
+
+export interface JciEccsTopUpRequest {
+  topUpAmount: number
+  tenureMonths: number
+  effectiveDate: string
+}
+
+export interface JciEccsCashRepaymentRequest {
+  principalAmount: number
+  interestAmount: number
+  repaymentDate: string
+  referenceId?: string | null
+  idempotencyKey: string
+}
+
+export interface JciEccsCollectionDetailResponse {
+  id: number
+  employeeId: number
+  memberId: number
+  thriftAmount: number
+  termLoanId: number | null
+  termPrincipal: number
+  termInterest: number
+  emergencyLoanId: number | null
+  emergencyPrincipal: number
+  emergencyInterest: number
+  totalSnapshotAmount: number | null
+  debitStatus: JciEccsDebitStatus
+  actualDebitedAmount: number
+}
+
+export interface JciEccsCollectionBatchResponse {
+  id: number
+  payrollRunId: string
+  cycleCode: string
+  batchStatus: JciEccsCollectionBatchStatus
+  lockedAt: string
+  debitConfirmedAt: string | null
+  totalExpectedAmount: number
+  totalDebitedAmount: number
+  details: JciEccsCollectionDetailResponse[]
+}
+
+export interface JciEccsFinancialPositionResponse {
+  member: JciEccsMemberResponse
+  activeTermLoan: JciEccsLoanResponse | null
+  activeEmergencyLoan: JciEccsLoanResponse | null
+}
+
+// --- JCIECCS Lifecycle Engine Phase 2: three-way reconciliation (DEMAND vs ACTUAL RECOVERY vs LEDGER
+// POSTING) + admin integrity checks. Never trust the frontend to compute these - always server-derived. ---
+
+export type JciEccsRecoveryComponent = 'THRIFT' | 'TERM_INTEREST' | 'TERM_PRINCIPAL' | 'EMERGENCY_INTEREST' | 'EMERGENCY_PRINCIPAL'
+export type JciEccsRecoverySource = 'PAYROLL' | 'CASH' | 'REVERSAL'
+export type JciEccsRecoveryStatus = 'PENDING' | 'CONFIRMED' | 'PARTIAL' | 'FAILED' | 'POSTED' | 'REVERSED' | 'RECONCILIATION_REQUIRED'
+export type JciEccsReconciliationStatus =
+  | 'MATCHED'
+  | 'PARTIAL'
+  | 'NOT_RECOVERED'
+  | 'OVER_RECOVERED'
+  | 'POSTING_PENDING'
+  | 'POSTING_MISMATCH'
+  | 'REVERSED'
+  | 'LOCKED_SNAPSHOT_CONFLICT'
+  | 'ERROR'
+export type JciEccsReconciliationReasonCode =
+  | 'PARTIAL_PAYROLL_DEBIT'
+  | 'FAILED_PAYROLL_DEBIT'
+  | 'OVER_DEBIT'
+  | 'POSTING_MISMATCH'
+  | 'DUPLICATE_CONFIRMATION'
+  | 'CASH_RECOVERY_AFTER_SNAPSHOT_LOCK'
+  | 'REVERSAL_AFTER_PAYROLL_POSTING'
+  | 'LOAN_BALANCE_MISMATCH'
+  | 'SCHEDULE_RECOVERY_MISMATCH'
+  | 'UNKNOWN'
+export type JciEccsReconciliationResolutionAction =
+  | 'ACKNOWLEDGE'
+  | 'MARK_RESOLVED'
+  | 'REQUEST_PAYROLL_CORRECTION'
+  | 'REVERSE_RECOVERY'
+  | 'NO_ACTION_REQUIRED'
+
+export interface JciEccsReconciliationResponse {
+  id: number
+  payrollRunId: string | null
+  collectionDetailId: number | null
+  membershipCode: string
+  memberName: string | null
+  employeeId: number
+  loanId: number | null
+  loanIssueId: string | null
+  component: JciEccsRecoveryComponent | null
+  expectedAmount: number
+  actualAmount: number
+  postedAmount: number
+  varianceAmount: number
+  status: JciEccsReconciliationStatus
+  reasonCode: JciEccsReconciliationReasonCode
+  detectedAt: string
+  resolved: boolean
+  resolvedAt: string | null
+  resolvedBy: number | null
+  resolutionAction: JciEccsReconciliationResolutionAction | null
+  resolutionRemarks: string | null
+}
+
+export interface JciEccsReconciliationSummaryResponse {
+  payrollRunId: string
+  totalLines: number
+  countsByStatus: Partial<Record<JciEccsReconciliationStatus, number>>
+}
+
+export interface JciEccsResolveReconciliationRequest {
+  action: JciEccsReconciliationResolutionAction
+  remarks: string
+}
+
+export interface JciEccsLoanReconciliationResponse {
+  loanId: number
+  originalPrincipal: number
+  postedPrincipalRecovery: number
+  postedPrincipalReversals: number
+  derivedOutstanding: number
+  storedOutstanding: number
+  outstandingVariance: number
+  schedulePrincipalRecovered: number
+  ledgerPrincipalRecovered: number
+  scheduleInterestRecovered: number
+  ledgerInterestRecovered: number
+  status: JciEccsReconciliationStatus
+}
+
+export type JciEccsIntegrityCheckSeverity = 'INFO' | 'WARNING' | 'CRITICAL'
+
+export interface JciEccsIntegrityCheckResultResponse {
+  checkType: string
+  entityType: string
+  entityId: number
+  severity: JciEccsIntegrityCheckSeverity
+  message: string
+  expectedValue: string
+  actualValue: string
+  detectedAt: string
+}
+
+/** The priority-cascade recovery/allocation audit trail (spec section 66). */
+export interface JciEccsRecoveryAllocationLine {
+  sequence: number
+  component: JciEccsRecoveryComponent
+  expectedAmount: number
+  allocatedAmount: number
+  loanId: number | null
+  loanScheduleId: number | null
+}
+
+export interface JciEccsRecoveryResponse {
+  id: number
+  source: JciEccsRecoverySource
+  status: JciEccsRecoveryStatus
+  membershipCode: string
+  employeeId: number
+  loanId: number | null
+  loanIssueId: string | null
+  grossAmount: number
+  createdAt: string
+  postedAt: string | null
+  reversalOfRecoveryId: number | null
+  allocations: JciEccsRecoveryAllocationLine[]
+}
+
+// --- JCIECCS Lifecycle Engine Phase 3: no-dues / settlement position, integrated with the existing HR
+// exit-clearance workflow (never a duplicate separation engine). ---
+
+export interface JciEccsSettlementResponse {
+  id: number
+  membershipCode: string
+  employeeId: number
+  exitClearanceRequestId: number | null
+  exitClearanceItemStatus: string | null
+  separationType: string | null
+  separationDate: string | null
+  shareBalance: number
+  fundBalance: number
+  securityBalance: number
+  thriftBalance: number
+  termPrincipalOutstanding: number
+  termInterestOutstanding: number
+  emergencyPrincipalOutstanding: number
+  emergencyInterestOutstanding: number
+  otherDues: number
+  setoffAmount: number
+  netLiability: number
+  stale: boolean
+  calculatedAt: string
+  remarks: string | null
+}
+
+export interface JciEccsClearNoDuesRequest {
+  remarks: string
+}
+
+export interface JciEccsStagingMemberRequest {
+  employeeCode: string
+  membershipCode: string
+  membershipDate: string
+  shareBalance?: number | null
+  fundBalance?: number | null
+  securityBalance?: number | null
+  thriftMonthlyAmount?: number | null
+}
+
+export interface JciEccsMigrationStatusResponse {
+  pending: number
+  promoted: number
+  rejected: number
+  rejectedRows: { id: number; employeeCode: string; membershipCode: string; rejectionReason: string | null }[]
 }

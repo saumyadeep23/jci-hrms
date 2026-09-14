@@ -2,15 +2,26 @@ import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { isAxiosError } from 'axios'
 import { apiClient } from '../../../api/client'
-import { formatDate } from '../../../lib/date'
 import { Badge, Card, EmptyState, ErrorState, LoadingState, PageHeader } from '../../../components/common/ui'
 import { EmployeePickerInput } from '../../../components/common/EmployeePickerInput'
 import type { CpfPassbookResponse, EmployeeResponse } from '../../../types/api'
 
-function currentFinancialYearOptions(): string[] {
-  const now = new Date()
-  const startYear = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1
-  return Array.from({ length: 5 }, (_, i) => `${startYear - i}-${startYear - i + 1}`)
+function finYearOf(date: Date): string {
+  const startYear = date.getMonth() >= 3 ? date.getFullYear() : date.getFullYear() - 1
+  return `${startYear}-${startYear + 1}`
+}
+
+/** FYs the member could actually have ledger activity in - from their joining FY through the current FY, most recent first. Not narrowed to a separation date (not available on EmployeeResponse) - a separated member simply shows no activity for FYs after their exit. */
+function financialYearOptionsFor(dateOfJoining: string): string[] {
+  const joiningFinYear = finYearOf(new Date(dateOfJoining))
+  const currentFinYear = finYearOf(new Date())
+  const joiningStartYear = Number(joiningFinYear.split('-')[0])
+  const currentStartYear = Number(currentFinYear.split('-')[0])
+  const count = Math.max(1, currentStartYear - joiningStartYear + 1)
+  return Array.from({ length: count }, (_, i) => {
+    const startYear = currentStartYear - i
+    return `${startYear}-${startYear + 1}`
+  })
 }
 
 function SummaryCard({ label, amount, emphasize = false }: { label: string; amount: number; emphasize?: boolean }) {
@@ -27,8 +38,13 @@ function SummaryCard({ label, amount, emphasize = false }: { label: string; amou
 /** Route: /payroll/trust/passbook - GET /api/v1/payroll/trust/cpf/passbook/{employeeId}?finYear=, including CpfTrustPassbookService's dynamic shadow-accrual projection and Para 60(2) provisional-rate notice. */
 export function CpfPassbookView() {
   const [employee, setEmployee] = useState<EmployeeResponse | null>(null)
-  const years = useMemo(() => currentFinancialYearOptions(), [])
-  const [finYear, setFinYear] = useState(years[0])
+  const [finYear, setFinYear] = useState('')
+  const years = useMemo(() => (employee ? financialYearOptionsFor(employee.dateOfJoining) : []), [employee])
+
+  function selectEmployee(next: EmployeeResponse | null) {
+    setEmployee(next)
+    setFinYear(next ? financialYearOptionsFor(next.dateOfJoining)[0] : '')
+  }
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['cpf-passbook', employee?.id, finYear],
@@ -38,7 +54,7 @@ export function CpfPassbookView() {
           params: { finYear },
         })
       ).data,
-    enabled: employee !== null,
+    enabled: employee !== null && finYear !== '',
     retry: false,
   })
 
@@ -55,7 +71,7 @@ export function CpfPassbookView() {
         <div className="flex flex-wrap items-end gap-4">
           <div className="min-w-[280px] flex-1">
             <label className="mb-1 block text-xs font-medium text-slate-600">Employee</label>
-            <EmployeePickerInput selected={employee} onSelect={setEmployee} />
+            <EmployeePickerInput selected={employee} onSelect={selectEmployee} />
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-slate-600">Financial Year</label>
@@ -91,10 +107,11 @@ export function CpfPassbookView() {
             </div>
           )}
 
-          <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <SummaryCard label="Audited Ledger Balance" amount={data.ledgerBalance} />
             <SummaryCard label="Accrued Interest (FYTD)" amount={data.accruedInterestFytd} />
             <SummaryCard label="Effective Total Corpus" amount={data.effectiveTotalCorpus} emphasize />
+            <SummaryCard label="Outstanding Refundable Loan Balance" amount={data.outstandingLoanBalance} />
           </div>
 
           <Card>
@@ -102,24 +119,49 @@ export function CpfPassbookView() {
               <EmptyState message="No ledger activity for this financial year." />
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[900px] border-collapse text-sm">
+                <table className="w-full min-w-[1400px] border-collapse text-sm">
                   <thead>
-                    <tr className="border-b border-slate-300 text-left text-slate-500">
-                      <th className="py-1.5 pr-3">Value Date</th>
-                      <th className="py-1.5 pr-3">Type</th>
-                      <th className="py-1.5 pr-3 text-right">EE Credit</th>
-                      <th className="py-1.5 pr-3 text-right">ER Credit</th>
-                      <th className="py-1.5 pr-3 text-right">VPF Credit</th>
-                      <th className="py-1.5 pr-3 text-right">Interest</th>
-                      <th className="py-1.5 pr-3 text-right">Running Total</th>
-                      <th className="py-1.5">Remarks</th>
+                    <tr className="border-b border-slate-200 text-left text-[11px] uppercase tracking-wide text-slate-400">
+                      <th className="py-1 pr-3" rowSpan={2}>
+                        Month
+                        <br />
+                        Year
+                      </th>
+                      <th className="py-1 pr-3" rowSpan={2}>
+                        Type
+                      </th>
+                      <th className="py-1 pr-3 text-center" colSpan={3}>
+                        Contribution to Fund
+                      </th>
+                      <th className="py-1 pr-3 text-center" colSpan={4}>
+                        Diversion / Loan Sanction
+                      </th>
+                      <th className="py-1 pr-3 text-center" colSpan={2}>
+                        Loan Repayment
+                      </th>
+                      <th className="py-1 pr-3 text-right" rowSpan={2}>
+                        Running Balance
+                        <br />
+                        (Total Net Fund)
+                      </th>
+                    </tr>
+                    <tr className="border-b border-slate-300 text-right text-slate-500">
+                      <th className="py-1.5 pr-3">EMP</th>
+                      <th className="py-1.5 pr-3">JCI</th>
+                      <th className="py-1.5 pr-3">VPF</th>
+                      <th className="py-1.5 pr-3">CPF</th>
+                      <th className="py-1.5 pr-3">NRW EMP</th>
+                      <th className="py-1.5 pr-3">NRW JCI</th>
+                      <th className="py-1.5 pr-3">NRW VPF</th>
+                      <th className="py-1.5 pr-3">Prin.</th>
+                      <th className="py-1.5 pr-3">Int.</th>
                     </tr>
                   </thead>
                   <tbody>
                     {data.entries.map((e) => (
                       <tr key={e.id} className="border-b border-slate-100">
-                        <td className="py-1.5 pr-3">{formatDate(e.valueDate)}</td>
-                        <td className="py-1.5 pr-3">
+                        <td className="py-1.5 pr-3 text-left whitespace-nowrap">{e.displayPeriod}</td>
+                        <td className="py-1.5 pr-3 text-left whitespace-nowrap">
                           <span>{e.entryType.replaceAll('_', ' ')}</span>
                           {e.entryType === 'INTERIM_SETTLEMENT_INTEREST' && (
                             <span
@@ -135,9 +177,13 @@ export function CpfPassbookView() {
                         <td className="py-1.5 pr-3 text-right tabular-nums">{e.eeShareCredit.toFixed(2)}</td>
                         <td className="py-1.5 pr-3 text-right tabular-nums">{e.erShareCredit.toFixed(2)}</td>
                         <td className="py-1.5 pr-3 text-right tabular-nums">{e.vpfCredit.toFixed(2)}</td>
-                        <td className="py-1.5 pr-3 text-right tabular-nums">{e.interestCredit.toFixed(2)}</td>
+                        <td className="py-1.5 pr-3 text-right tabular-nums">{e.sancCpfLoan.toFixed(2)}</td>
+                        <td className="py-1.5 pr-3 text-right tabular-nums">{e.sancNrwEe.toFixed(2)}</td>
+                        <td className="py-1.5 pr-3 text-right tabular-nums">{e.sancNrwEr.toFixed(2)}</td>
+                        <td className="py-1.5 pr-3 text-right tabular-nums">{e.sancNrwVpf.toFixed(2)}</td>
+                        <td className="py-1.5 pr-3 text-right tabular-nums">{e.loanRepayPrincipal.toFixed(2)}</td>
+                        <td className="py-1.5 pr-3 text-right tabular-nums">{e.loanRepayInterest.toFixed(2)}</td>
                         <td className="py-1.5 pr-3 text-right tabular-nums font-medium">{e.runningTotalBalance.toFixed(2)}</td>
-                        <td className="py-1.5 text-xs text-slate-500">{e.remarks ?? '-'}</td>
                       </tr>
                     ))}
                   </tbody>

@@ -209,6 +209,9 @@ class SuspensionLifecycleTest {
     @Mock private PayrollTaxOverrideRepository payrollTaxOverrideRepository;
     @Mock private EmployeeCeaClaimRepository ceaClaimRepository;
     @Mock private EmployeeDeputationRecordRepository deputationRecordRepository;
+    @Mock private in.gov.jci.hrms.service.PayrollQueryService payrollQueryService;
+    @Mock private CpfLoanPayrollRecoveryResolverService cpfLoanPayrollRecoveryResolverService;
+    @Mock private JciEccsPayrollRecoveryResolverService jciEccsPayrollRecoveryResolverService;
 
     private PayrollBatchComputationService payrollBatchService;
     private PayrollBatch batch;
@@ -220,7 +223,10 @@ class SuspensionLifecycleTest {
                 daRateHistoryRepository, dailyAttendanceRepository, payrollHraRateRepository, transportAllowanceRateRepository,
                 ptaxSlabRepository, stateMasterRepository, payrollStatutoryParameterRepository, npsDeclarationRepository,
                 vehicleAllotmentRepository, quarterAllotmentService, encashmentRepository, payrollMovementInputRepository,
-                payrollTdsEngine, payrollTaxOverrideRepository, ceaClaimRepository, suspensionRepository, necRepository, deputationRecordRepository);
+                payrollTdsEngine, payrollTaxOverrideRepository, ceaClaimRepository, suspensionRepository, necRepository, deputationRecordRepository,
+                payrollQueryService, cpfLoanPayrollRecoveryResolverService, jciEccsPayrollRecoveryResolverService);
+        when(cpfLoanPayrollRecoveryResolverService.resolve(any(), any())).thenReturn(CpfLoanPayrollRecoveryResolverService.RecoveryAmounts.ZERO);
+        when(jciEccsPayrollRecoveryResolverService.resolve(any(), any())).thenReturn(JciEccsPayrollRecoveryResolverService.RecoveryAmounts.ZERO);
 
         batch = new PayrollBatch("BATCH-2026-08", 8, 2026, "2026-2027");
         ReflectionTestUtils.setField(batch, "id", 100L);

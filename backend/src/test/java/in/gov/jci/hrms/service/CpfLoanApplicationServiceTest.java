@@ -117,7 +117,7 @@ class CpfLoanApplicationServiceTest {
         CpfLoanApplicationResponse first = cpfLoanApplicationService.applyLoan(
                 applicationRequest(CpfLoanType.REFUNDABLE_LOAN, new BigDecimal("5000.00")), null);
         cpfLoanApplicationService.sanctionLoan(first.id(),
-                new CpfLoanSanctionRequest(new BigDecimal("5000.00"), "SANC/001", SANCTION_DATE, 10, 10), null);
+                new CpfLoanSanctionRequest(new BigDecimal("5000.00"), "SANC/001", SANCTION_DATE, 10, 10, null, null, null), null);
         cpfLoanApplicationService.disburseLoan(first.id(), null);
 
         CpfLoanEligibilityResponse eligibility = cpfLoanApplicationService.checkEligibility(employee.getId(), CpfLoanType.REFUNDABLE_LOAN, "HOUSING");
@@ -141,7 +141,7 @@ class CpfLoanApplicationServiceTest {
         assertThat(applied.monthlyRecoveryPrincipal()).isEqualByComparingTo("600.00");
 
         CpfLoanApplicationResponse sanctioned = cpfLoanApplicationService.sanctionLoan(applied.id(),
-                new CpfLoanSanctionRequest(new BigDecimal("5000.00"), "SANC/LIFECYCLE/001", SANCTION_DATE, 5, 5), null);
+                new CpfLoanSanctionRequest(new BigDecimal("5000.00"), "SANC/LIFECYCLE/001", SANCTION_DATE, 5, 5, null, null, null), null);
         assertThat(sanctioned.status()).isEqualTo(CpfLoanApplicationStatus.SANCTIONED);
         assertThat(sanctioned.sanctionedAmount()).isEqualByComparingTo("5000.00");
         // Recomputed at sanction time: 5000 / 5 = 1000.00 (not the original 600.00).
@@ -162,15 +162,15 @@ class CpfLoanApplicationServiceTest {
     }
 
     @Test
-    void disburseLoan_debitsEeFirstThenSpillsIntoVpf_andWritesRunningBalances() {
+    void disburseLoan_refundableLoan_debitsEeFirstThenSpillsIntoVpf_andWritesRunningBalances() {
         // Only 3000 in EE, 5000 in VPF - a 5000 disbursement must debit all of EE (3000) then the
         // remaining 2000 from VPF.
         seedBalance(new BigDecimal("3000.00"), new BigDecimal("5000.00"));
 
         CpfLoanApplicationResponse applied = cpfLoanApplicationService.applyLoan(
-                applicationRequest(CpfLoanType.NON_REFUNDABLE_WITHDRAWAL, new BigDecimal("5000.00")), null);
+                applicationRequest(CpfLoanType.REFUNDABLE_LOAN, new BigDecimal("5000.00")), null);
         cpfLoanApplicationService.sanctionLoan(applied.id(),
-                new CpfLoanSanctionRequest(new BigDecimal("5000.00"), "SANC/SPILL/001", SANCTION_DATE, 1, 1), null);
+                new CpfLoanSanctionRequest(new BigDecimal("5000.00"), "SANC/SPILL/001", SANCTION_DATE, 1, 1, null, null, null), null);
         cpfLoanApplicationService.disburseLoan(applied.id(), null);
 
         List<CpfTrustMemberLedgerEntry> entries = ledgerRepository.findByEmployee_IdOrderByValueDateAscIdAsc(employee.getId());
@@ -181,8 +181,50 @@ class CpfLoanApplicationServiceTest {
         assertThat(withdrawal.getTotalDebit()).isEqualByComparingTo("5000.00");
         assertThat(withdrawal.getRunningEeBalance()).isEqualByComparingTo("0.00");
         assertThat(withdrawal.getRunningVpfBalance()).isEqualByComparingTo("3000.00");
+        assertThat(withdrawal.getSancCpfLoan()).isEqualByComparingTo("5000.00");
+        assertThat(withdrawal.getRunningLoanCpfBalance()).isEqualByComparingTo("5000.00");
         assertThat(withdrawal.getLoan()).isNotNull();
         assertThat(withdrawal.getLoan().getId()).isEqualTo(applied.id());
+    }
+
+    @Test
+    void disburseLoan_nonRefundableWithdrawal_debitsExactlyTheSanctionedHeadwiseSplit() {
+        seedBalance(new BigDecimal("10000.00"), new BigDecimal("4000.00"));
+
+        CpfLoanApplicationResponse applied = cpfLoanApplicationService.applyLoan(
+                applicationRequest(CpfLoanType.NON_REFUNDABLE_WITHDRAWAL, new BigDecimal("5000.00")), null);
+        cpfLoanApplicationService.sanctionLoan(applied.id(),
+                new CpfLoanSanctionRequest(new BigDecimal("5000.00"), "SANC/NRW/001", SANCTION_DATE, 1, 1,
+                        new BigDecimal("3000.00"), new BigDecimal("0.00"), new BigDecimal("2000.00")), null);
+        cpfLoanApplicationService.disburseLoan(applied.id(), null);
+
+        List<CpfTrustMemberLedgerEntry> entries = ledgerRepository.findByEmployee_IdOrderByValueDateAscIdAsc(employee.getId());
+        CpfTrustMemberLedgerEntry withdrawal = entries.get(entries.size() - 1);
+        assertThat(withdrawal.getEntryType()).isEqualTo(CpfLedgerEntryType.LOAN_WITHDRAWAL);
+        // Debits exactly the officer-allocated split, not an EE-then-VPF waterfall.
+        assertThat(withdrawal.getEeShareDebit()).isEqualByComparingTo("3000.00");
+        assertThat(withdrawal.getVpfDebit()).isEqualByComparingTo("2000.00");
+        assertThat(withdrawal.getErShareDebit()).isEqualByComparingTo("0.00");
+        assertThat(withdrawal.getSancNrwEe()).isEqualByComparingTo("3000.00");
+        assertThat(withdrawal.getSancNrwVpf()).isEqualByComparingTo("2000.00");
+        assertThat(withdrawal.getRunningNrwEeBalance()).isEqualByComparingTo("3000.00");
+        assertThat(withdrawal.getRunningNrwVpfBalance()).isEqualByComparingTo("2000.00");
+        // A Non-Refundable Withdrawal never touches the tracked Refundable Loan balance.
+        assertThat(withdrawal.getRunningLoanCpfBalance()).isEqualByComparingTo("0.00");
+        assertThat(withdrawal.getRunningEeBalance()).isEqualByComparingTo("7000.00");
+        assertThat(withdrawal.getRunningVpfBalance()).isEqualByComparingTo("2000.00");
+    }
+
+    @Test
+    void sanctionLoan_nonRefundableWithdrawal_headwiseSplitNotSummingToSanctionedAmount_throws() {
+        seedBalance(new BigDecimal("10000.00"), new BigDecimal("4000.00"));
+        CpfLoanApplicationResponse applied = cpfLoanApplicationService.applyLoan(
+                applicationRequest(CpfLoanType.NON_REFUNDABLE_WITHDRAWAL, new BigDecimal("5000.00")), null);
+
+        assertThatThrownBy(() -> cpfLoanApplicationService.sanctionLoan(applied.id(),
+                new CpfLoanSanctionRequest(new BigDecimal("5000.00"), "SANC/NRW/BAD", SANCTION_DATE, 1, 1,
+                        new BigDecimal("3000.00"), new BigDecimal("0.00"), new BigDecimal("1000.00")), null))
+                .isInstanceOf(BusinessRuleViolationException.class);
     }
 
     @Test
@@ -192,7 +234,7 @@ class CpfLoanApplicationServiceTest {
         CpfLoanApplicationResponse applied = cpfLoanApplicationService.applyLoan(
                 applicationRequest(CpfLoanType.REFUNDABLE_LOAN, new BigDecimal("1000.00")), null);
         cpfLoanApplicationService.sanctionLoan(applied.id(),
-                new CpfLoanSanctionRequest(new BigDecimal("1000.00"), "SANC/CLOSE/001", SANCTION_DATE, 1, 1), null);
+                new CpfLoanSanctionRequest(new BigDecimal("1000.00"), "SANC/CLOSE/001", SANCTION_DATE, 1, 1, null, null, null), null);
         cpfLoanApplicationService.disburseLoan(applied.id(), null);
 
         PayrollBatch batch = payrollBatchRepository.save(new PayrollBatch("BATCH-CPFLOAN-1", 7, 2026, "2026-2027"));

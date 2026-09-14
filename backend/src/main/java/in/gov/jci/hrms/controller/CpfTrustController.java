@@ -1,7 +1,5 @@
 package in.gov.jci.hrms.controller;
 
-import in.gov.jci.hrms.dto.CpfAnnualInterestRunRequest;
-import in.gov.jci.hrms.dto.CpfAnnualInterestRunResponse;
 import in.gov.jci.hrms.dto.CpfPassbookResponseDto;
 import in.gov.jci.hrms.dto.CpfTrustLedgerEntryResponse;
 import in.gov.jci.hrms.dto.CreditLedgerRequest;
@@ -92,12 +90,6 @@ public class CpfTrustController {
     @PutMapping("/incoming-transfers/{id}/reject")
     public IncomingFundTransferResponse rejectTransfer(@PathVariable Long id, @Valid @RequestBody RejectRemarksRequest request) {
         return incomingFundTransferService.reject(id, request.remarks());
-    }
-
-    @PostMapping("/interest/annual-run")
-    public CpfAnnualInterestRunResponse annualInterestRun(@Valid @RequestBody CpfAnnualInterestRunRequest request) {
-        return cpfInterestComputationService.computeAnnualInterest(request.finYear(), request.declaredInterestRate(),
-                request.interestOrderNo(), request.interestOrderDate(), request.postedByOfficerId());
     }
 
     @PostMapping("/settlements/crystallize-interest")

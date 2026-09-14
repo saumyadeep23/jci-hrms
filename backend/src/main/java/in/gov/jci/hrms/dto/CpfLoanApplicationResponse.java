@@ -22,6 +22,9 @@ public record CpfLoanApplicationResponse(
         BigDecimal sanctionedAmount,
         String sanctionOrderNo,
         LocalDate sanctionDate,
+        BigDecimal sancNrwEe,
+        BigDecimal sancNrwEr,
+        BigDecimal sancNrwVpf,
         BigDecimal baseCpfRate,
         BigDecimal interestRate,
         BigDecimal totalInterestAmount,
@@ -39,17 +42,20 @@ public record CpfLoanApplicationResponse(
         CpfLoanApplicationStatus status,
         String rejectionRemarks,
         Instant disbursedAt,
-        Instant createdAt
+        Instant createdAt,
+        /** Part 7/38 - the cpf_application.id this loan was bridged from, when it originated through the rule-engine refundable-withdrawal flow rather than being applied directly through this service. Null for a directly-applied loan. */
+        java.util.UUID cpfApplicationId
 ) {
     public static CpfLoanApplicationResponse from(CpfLoanApplication loan) {
         return new CpfLoanApplicationResponse(
                 loan.getId(), loan.getLoanApplicationNo(), loan.getEmployee().getId(), loan.getEmployee().getEmployeeCode(),
                 loan.getEmployee().getFullName(), loan.getLoanType(), loan.getPurpose(), loan.getApplicationReason(),
                 loan.getAppliedAmount(), loan.getSanctionedAmount(), loan.getSanctionOrderNo(), loan.getSanctionDate(),
+                loan.getSancNrwEe(), loan.getSancNrwEr(), loan.getSancNrwVpf(),
                 loan.getBaseCpfRate(), loan.getInterestRate(), loan.getTotalInterestAmount(),
                 loan.getMonthlyRecoveryPrincipal(), loan.getMonthlyRecoveryInterest(), loan.getTotalInstallments(),
                 loan.getRecoveredInstallments(), loan.getTotalInterestInstallments(), loan.getRecoveredInterestInstallments(),
                 loan.getOutstandingBalance(), loan.getOutstandingInterest(), loan.getRecoveryPhase(), loan.isPreclosed(), loan.getPreclosedAt(),
-                loan.getStatus(), loan.getRejectionRemarks(), loan.getDisbursedAt(), loan.getCreatedAt());
+                loan.getStatus(), loan.getRejectionRemarks(), loan.getDisbursedAt(), loan.getCreatedAt(), loan.getCpfApplicationId());
     }
 }

@@ -55,13 +55,16 @@ public class CpfLoanApplicationService {
     private final CpfTrustMemberLedgerEntryRepository ledgerRepository;
     private final EmployeeRepository employeeRepository;
     private final CpfRateResolutionService rateResolutionService;
+    private final CpfLoanRecoveryPolicyService recoveryPolicyService;
 
     public CpfLoanApplicationService(CpfLoanApplicationRepository loanRepository, CpfTrustMemberLedgerEntryRepository ledgerRepository,
-                                      EmployeeRepository employeeRepository, CpfRateResolutionService rateResolutionService) {
+                                      EmployeeRepository employeeRepository, CpfRateResolutionService rateResolutionService,
+                                      CpfLoanRecoveryPolicyService recoveryPolicyService) {
         this.loanRepository = loanRepository;
         this.ledgerRepository = ledgerRepository;
         this.employeeRepository = employeeRepository;
         this.rateResolutionService = rateResolutionService;
+        this.recoveryPolicyService = recoveryPolicyService;
     }
 
     public CpfLoanEligibilityResponse checkEligibility(Long employeeId, CpfLoanType loanType, String purpose) {
@@ -147,21 +150,42 @@ public class CpfLoanApplicationService {
                             + eligibility.maxPermissibleAmount() + " (75% of EE+VPF corpus)");
         }
 
+        BigDecimal sancNrwEe = BigDecimal.ZERO;
+        BigDecimal sancNrwEr = BigDecimal.ZERO;
+        BigDecimal sancNrwVpf = BigDecimal.ZERO;
+        if (loan.getLoanType() == CpfLoanType.NON_REFUNDABLE_WITHDRAWAL) {
+            sancNrwEe = request.sancNrwEe() != null ? request.sancNrwEe() : BigDecimal.ZERO;
+            sancNrwEr = request.sancNrwEr() != null ? request.sancNrwEr() : BigDecimal.ZERO;
+            sancNrwVpf = request.sancNrwVpf() != null ? request.sancNrwVpf() : BigDecimal.ZERO;
+            BigDecimal splitTotal = sancNrwEe.add(sancNrwEr).add(sancNrwVpf);
+            if (splitTotal.compareTo(request.sanctionedAmount()) != 0) {
+                throw new BusinessRuleViolationException(
+                        "Non-Refundable Withdrawal head-wise split (EE " + sancNrwEe + " + ER " + sancNrwEr + " + VPF " + sancNrwVpf
+                                + " = " + splitTotal + ") must equal the sanctioned amount " + request.sanctionedAmount());
+            }
+        }
+
         String finYear = IncomingFundTransferService.financialYearFor(request.sanctionDate());
         CpfResolvedRateDto resolvedRate = rateResolutionService.resolveStatutoryRate(finYear);
         BigDecimal totalInterest = computeTotalInterest(request.sanctionedAmount(), request.totalInstallments(), resolvedRate.loanRate());
-        BigDecimal monthlyInterest = totalInterest.divide(BigDecimal.valueOf(request.interestInstallments()), 2, RoundingMode.HALF_UP);
+        int interestInstallments = request.interestInstallments() != null
+                ? request.interestInstallments()
+                : resolveInterestInstallmentsFromPolicy(request.totalInstallments());
+        BigDecimal monthlyInterest = totalInterest.divide(BigDecimal.valueOf(interestInstallments), 2, RoundingMode.HALF_UP);
 
         loan.setSanctionedAmount(request.sanctionedAmount());
         loan.setSanctionOrderNo(request.sanctionOrderNo());
         loan.setSanctionDate(request.sanctionDate());
+        loan.setSancNrwEe(sancNrwEe);
+        loan.setSancNrwEr(sancNrwEr);
+        loan.setSancNrwVpf(sancNrwVpf);
         loan.setBaseCpfRate(resolvedRate.baseRate());
         loan.setInterestRate(resolvedRate.loanRate());
         loan.setTotalInterestAmount(totalInterest);
         loan.setOutstandingBalance(request.sanctionedAmount());
         loan.setOutstandingInterest(totalInterest);
         loan.setTotalInstallments(request.totalInstallments());
-        loan.setTotalInterestInstallments(request.interestInstallments());
+        loan.setTotalInterestInstallments(interestInstallments);
         loan.setRecoveredInstallments(0);
         loan.setRecoveredInterestInstallments(0);
         loan.setMonthlyRecoveryPrincipal(computeMonthlyRecovery(request.sanctionedAmount(), request.totalInstallments()));
@@ -172,13 +196,33 @@ public class CpfLoanApplicationService {
         return CpfLoanApplicationResponse.from(loan);
     }
 
-    private BigDecimal computeTotalInterest(BigDecimal sanctionedAmount, int principalInstallments, BigDecimal loanRate) {
+    /**
+     * Part 19: "12 principal installments -&gt; 1 interest installment" etc., with the ratio itself
+     * (principalInstallmentsPerInterestInstallment) read from CpfLoanRecoveryPolicy rather than
+     * hardcoded - ceiling division so a non-exact multiple (e.g. 30 principal installments at ratio 12)
+     * still yields a whole number of interest installments (3, not 2.5) that fully recovers the
+     * interest total.
+     */
+    int resolveInterestInstallmentsFromPolicy(int totalPrincipalInstallments) {
+        int ratio = recoveryPolicyService.currentOrThrow().getPrincipalInstallmentsPerInterestInstallment();
+        return (totalPrincipalInstallments + ratio - 1) / ratio;
+    }
+
+    /** Package-visible (not private) so CpfApplicationService's rule-driven flow can reuse this exact formula (Part 17: "do NOT create a second CPF interest engine") rather than duplicating it. */
+    BigDecimal computeTotalInterest(BigDecimal sanctionedAmount, int principalInstallments, BigDecimal loanRate) {
         return BigDecimal.valueOf(principalInstallments + 1L)
                 .multiply(sanctionedAmount)
                 .multiply(loanRate)
                 .divide(TWENTY_FOUR_HUNDRED, 2, RoundingMode.HALF_UP);
     }
 
+    /**
+     * REFUNDABLE_LOAN debits EE only (spilling into VPF if EE is insufficient - unchanged, tested
+     * behavior). NON_REFUNDABLE_WITHDRAWAL instead debits exactly the officer-allocated sanc_nrw_ee/er/vpf
+     * split recorded at sanction time - see sanctionLoan()'s validation that this split sums to
+     * sanctionedAmount. ER is only ever touched by the NRW path; a refundable loan never draws on the
+     * employer's own JCPF share (see this class's own javadoc).
+     */
     @Transactional
     public CpfLoanApplicationResponse disburseLoan(Long loanId, Long disburseOfficerId) {
         CpfLoanApplication loan = findOrThrow(loanId);
@@ -195,25 +239,70 @@ public class CpfLoanApplicationService {
         BigDecimal priorEe = BigDecimal.ZERO;
         BigDecimal priorEr = BigDecimal.ZERO;
         BigDecimal priorVpf = BigDecimal.ZERO;
+        BigDecimal priorLoanCpfBalance = BigDecimal.ZERO;
+        BigDecimal priorNrwEeBalance = BigDecimal.ZERO;
+        BigDecimal priorNrwErBalance = BigDecimal.ZERO;
+        BigDecimal priorNrwVpfBalance = BigDecimal.ZERO;
         var priorEntry = ledgerRepository.findFirstByEmployee_IdOrderByValueDateDescIdDesc(employee.getId());
         if (priorEntry.isPresent()) {
             priorEe = priorEntry.get().getRunningEeBalance();
             priorEr = priorEntry.get().getRunningErBalance();
             priorVpf = priorEntry.get().getRunningVpfBalance();
+            priorLoanCpfBalance = priorEntry.get().getRunningLoanCpfBalance();
+            priorNrwEeBalance = priorEntry.get().getRunningNrwEeBalance();
+            priorNrwErBalance = priorEntry.get().getRunningNrwErBalance();
+            priorNrwVpfBalance = priorEntry.get().getRunningNrwVpfBalance();
         }
 
-        BigDecimal eeShareDebit = loan.getSanctionedAmount().min(priorEe);
-        BigDecimal vpfDebit = loan.getSanctionedAmount().subtract(eeShareDebit).max(BigDecimal.ZERO);
+        BigDecimal eeShareDebit;
+        BigDecimal erShareDebit;
+        BigDecimal vpfDebit;
+        BigDecimal sancCpfLoan = BigDecimal.ZERO;
+        BigDecimal sancNrwEe = BigDecimal.ZERO;
+        BigDecimal sancNrwEr = BigDecimal.ZERO;
+        BigDecimal sancNrwVpf = BigDecimal.ZERO;
+        BigDecimal newLoanCpfBalance = priorLoanCpfBalance;
+        BigDecimal newNrwEeBalance = priorNrwEeBalance;
+        BigDecimal newNrwErBalance = priorNrwErBalance;
+        BigDecimal newNrwVpfBalance = priorNrwVpfBalance;
+
+        if (loan.getLoanType() == CpfLoanType.NON_REFUNDABLE_WITHDRAWAL) {
+            sancNrwEe = loan.getSancNrwEe();
+            sancNrwEr = loan.getSancNrwEr();
+            sancNrwVpf = loan.getSancNrwVpf();
+            eeShareDebit = sancNrwEe;
+            erShareDebit = sancNrwEr;
+            vpfDebit = sancNrwVpf;
+            newNrwEeBalance = priorNrwEeBalance.add(sancNrwEe);
+            newNrwErBalance = priorNrwErBalance.add(sancNrwEr);
+            newNrwVpfBalance = priorNrwVpfBalance.add(sancNrwVpf);
+        } else {
+            sancCpfLoan = loan.getSanctionedAmount();
+            eeShareDebit = sancCpfLoan.min(priorEe);
+            erShareDebit = BigDecimal.ZERO;
+            vpfDebit = sancCpfLoan.subtract(eeShareDebit).max(BigDecimal.ZERO);
+            newLoanCpfBalance = priorLoanCpfBalance.add(sancCpfLoan);
+        }
 
         LocalDate valueDate = LocalDate.now();
         String finYear = IncomingFundTransferService.financialYearFor(valueDate);
         BigDecimal newEe = priorEe.subtract(eeShareDebit);
+        BigDecimal newEr = priorEr.subtract(erShareDebit);
         BigDecimal newVpf = priorVpf.subtract(vpfDebit);
         CpfTrustMemberLedgerEntry entry = new CpfTrustMemberLedgerEntry(employee, finYear, valueDate, CpfLedgerEntryType.LOAN_WITHDRAWAL,
-                newEe, priorEr, newVpf, newEe.add(priorEr).add(newVpf));
+                newEe, newEr, newVpf, newEe.add(newEr).add(newVpf));
         entry.setEeShareDebit(eeShareDebit);
+        entry.setErShareDebit(erShareDebit);
         entry.setVpfDebit(vpfDebit);
-        entry.setTotalDebit(eeShareDebit.add(vpfDebit));
+        entry.setTotalDebit(eeShareDebit.add(erShareDebit).add(vpfDebit));
+        entry.setSancCpfLoan(sancCpfLoan);
+        entry.setSancNrwEe(sancNrwEe);
+        entry.setSancNrwEr(sancNrwEr);
+        entry.setSancNrwVpf(sancNrwVpf);
+        entry.setRunningLoanCpfBalance(newLoanCpfBalance);
+        entry.setRunningNrwEeBalance(newNrwEeBalance);
+        entry.setRunningNrwErBalance(newNrwErBalance);
+        entry.setRunningNrwVpfBalance(newNrwVpfBalance);
         entry.setLoan(loan);
         entry.setReferenceDocNo(loan.getSanctionOrderNo());
         entry.setRemarks("CPF loan/withdrawal disbursed against application " + loan.getLoanApplicationNo());
@@ -254,12 +343,18 @@ public class CpfLoanApplicationService {
         return loanRepository.findById(id).orElseThrow(() -> new MasterDataNotFoundException("CPF Loan Application", id));
     }
 
-    private BigDecimal computeMonthlyRecovery(BigDecimal amount, int totalInstallments) {
+    /** Package-visible so CpfApplicationService's bridge (Part 4) can compute the same monthly-recovery figure for a rule-engine-originated loan without re-deriving the formula. */
+    BigDecimal computeMonthlyRecovery(BigDecimal amount, int totalInstallments) {
         return amount.divide(BigDecimal.valueOf(totalInstallments), 2, RoundingMode.HALF_UP);
     }
 
-    /** "CPFL/{finYear}/{seq, 4 digits}" - same low-volume, human-paced-workflow rationale as IncomingFundTransferService's own voucher generator for why this isn't advisory-lock-guarded. */
-    private String generateLoanApplicationNo() {
+    /**
+     * "CPFL/{finYear}/{seq, 4 digits}" - same low-volume, human-paced-workflow rationale as
+     * IncomingFundTransferService's own voucher generator for why this isn't advisory-lock-guarded.
+     * Package-visible so CpfApplicationService's bridge (Part 4) numbers a rule-engine-originated loan
+     * identically to one applied directly through this service, rather than inventing a second scheme.
+     */
+    String generateLoanApplicationNo() {
         String finYear = IncomingFundTransferService.financialYearFor(LocalDate.now());
         String prefix = "CPFL/" + finYear + "/";
         long seq = loanRepository.countByLoanApplicationNoStartingWith(prefix) + 1;

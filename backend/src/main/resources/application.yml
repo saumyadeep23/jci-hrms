@@ -79,3 +79,10 @@ payroll:
     hra-percent-y: 16.00
     hra-percent-z: 8.00
     transport-allowance-base: 1600.00
+
+# PLACEHOLDER figures, not confirmed JCI Trust/EPS scheme policy - see
+# CpfTrustPolicyProperties javadoc. Override once the real numbers are known.
+cpf:
+  trust:
+    settlement-due-days: 30
+    eps-minimum-pensionable-service-years: 10

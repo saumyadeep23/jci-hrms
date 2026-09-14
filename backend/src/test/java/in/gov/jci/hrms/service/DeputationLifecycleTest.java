@@ -183,6 +183,9 @@ class DeputationLifecycleTest {
     @Mock private EmployeeCeaClaimRepository ceaClaimRepository;
     @Mock private EmployeeSuspensionRecordRepository suspensionRecordRepository;
     @Mock private EmployeeSuspensionNecRepository suspensionNecRepository;
+    @Mock private in.gov.jci.hrms.service.PayrollQueryService payrollQueryService;
+    @Mock private CpfLoanPayrollRecoveryResolverService cpfLoanPayrollRecoveryResolverService;
+    @Mock private JciEccsPayrollRecoveryResolverService jciEccsPayrollRecoveryResolverService;
 
     private PayrollBatchComputationService payrollBatchService;
     private PayrollBatch batch;
@@ -195,7 +198,9 @@ class DeputationLifecycleTest {
                 ptaxSlabRepository, stateMasterRepository, payrollStatutoryParameterRepository, npsDeclarationRepository,
                 vehicleAllotmentRepository, quarterAllotmentService, encashmentRepository, payrollMovementInputRepository,
                 payrollTdsEngine, payrollTaxOverrideRepository, ceaClaimRepository, suspensionRecordRepository, suspensionNecRepository,
-                deputationRepository);
+                deputationRepository, payrollQueryService, cpfLoanPayrollRecoveryResolverService, jciEccsPayrollRecoveryResolverService);
+        when(cpfLoanPayrollRecoveryResolverService.resolve(any(), any())).thenReturn(CpfLoanPayrollRecoveryResolverService.RecoveryAmounts.ZERO);
+        when(jciEccsPayrollRecoveryResolverService.resolve(any(), any())).thenReturn(JciEccsPayrollRecoveryResolverService.RecoveryAmounts.ZERO);
 
         batch = new PayrollBatch("BATCH-2026-08", 8, 2026, "2026-2027");
         ReflectionTestUtils.setField(batch, "id", 100L);

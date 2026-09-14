@@ -62,7 +62,7 @@ class ExitClearanceServiceTest {
     }
 
     @Test
-    void initiateExit_provisionsAllSevenDepartmentItems() {
+    void initiateExit_provisionsOneItemPerDepartment() {
         when(employeeRepository.findById(EMPLOYEE_ID)).thenReturn(Optional.of(employee));
         when(clearanceRequestRepository.existsByEmployeeIdAndStatusNot(EMPLOYEE_ID, ExitClearanceStatus.CANCELLED)).thenReturn(false);
         when(clearanceRequestRepository.save(any())).thenAnswer(inv -> {
@@ -73,8 +73,11 @@ class ExitClearanceServiceTest {
 
         service.initiateExit(EMPLOYEE_ID, SeparationType.SUPERANNUATION, LocalDate.of(2026, 12, 31), "remarks");
 
+        // Never hardcode the department count - JCIECCS (Task 4 Phase 3) added an 8th department to this
+        // same enum; asserting against ExitClearanceDepartment.values().length keeps this test correct
+        // regardless of how many departments the enum has.
         ArgumentCaptor<ExitClearanceItem> captor = ArgumentCaptor.forClass(ExitClearanceItem.class);
-        verify(clearanceItemRepository, times(7)).save(captor.capture());
+        verify(clearanceItemRepository, times(ExitClearanceDepartment.values().length)).save(captor.capture());
         assertThat(captor.getAllValues()).extracting(ExitClearanceItem::getDepartmentCode)
                 .containsExactlyInAnyOrder(ExitClearanceDepartment.values());
     }

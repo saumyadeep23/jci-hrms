@@ -187,13 +187,22 @@ public class PayrollBatchComputationService {
      * payroll_statutory_heads (V66) rows this class posts employer-side amounts against, via
      * payroll_monthly_statutory_items - a table that already existed in the schema (created
      * alongside payroll_monthly_head_items in V69) but had no JPA mapping or writer anywhere until
-     * now. The catalog's own labels drove this mapping (see resolveEmployerContributions()): 1 "CPF"
-     * is the employer's EPF-equivalent remainder (mirrors the old PayrollComputationService's
-     * employerEpf), 4 "Pension Fund" is the employer's EPS-equivalent carve-out (employerEps), 15
-     * "Employer's Contribution to National Pension Scheme" is the NPS employer match. There is no
-     * other code anywhere establishing this mapping - it is this class's own interpretation of an
-     * until-now-unused catalog, not a confirmed pre-existing convention.
+     * now. The catalog's own labels drove this mapping (see resolveEmployerContributions() for the
+     * exact formulas): 1 "CPF" always mirrors the employee's own Head 27 CPF deduction
+     * (computeCpf()) unconditionally - no eligibility gate exists anywhere on Employee for CPF
+     * itself, unlike isEpsEligible()/isNpsEligible(). 4 "Pension Fund" is the EPS carve-out out of
+     * that same CPF, gated on isEpsEligible() (0 otherwise). 3 "JCPF" (V78 addition, the JCI Trust's
+     * own scheme) is unconditional too - whatever of stat head 1 isn't diverted to stat head 4 (i.e.
+     * stat head 1 minus stat head 4), so a non-EPS-eligible employee's entire CPF still lands there
+     * rather than being dropped. 15 "Employer's Contribution to National Pension Scheme" is the NPS
+     * employer match. There is no other code anywhere establishing this mapping - it is this class's
+     * own interpretation of an until-now-unused catalog, not a confirmed pre-existing convention.
+     *
+     * <p>Before the V78 JCPF addition, nothing ever posted to stat head 3, so
+     * CpfLedgerSyncService.syncForBatch()'s erCredit (which reads exactly this stat head) was always
+     * zero - see that class's own javadoc, which already assumed this head would eventually be wired.
      */
+    private static final int STAT_HEAD_EMPLOYER_JCPF = 3;
     private static final int STAT_HEAD_EMPLOYER_EPF = 1;
     private static final int STAT_HEAD_EMPLOYER_PENSION = 4;
     private static final int STAT_HEAD_EMPLOYER_NPS = 15;
@@ -219,6 +228,13 @@ public class PayrollBatchComputationService {
     private static final int HEAD_ACCOM_ELECTRIC = 65;
     private static final int HEAD_SUBSIST_ALLOW = 66;
     private static final int HEAD_DEP_ALLOW = 67;
+    private static final int HEAD_CPFLOAN_PRIN = 30;
+    private static final int HEAD_CPFLOAN_INT = 31;
+    private static final int HEAD_JCIECCS_THRIFT = 47;
+    private static final int HEAD_JCIECCS_TERM_PRIN = 52;
+    private static final int HEAD_JCIECCS_TERM_INT = 53;
+    private static final int HEAD_JCIECCS_EMCY_PRIN = 54;
+    private static final int HEAD_JCIECCS_EMCY_INT = 55;
 
     private final PayrollBatchRepository payrollBatchRepository;
     private final PayrollMonthlyRecordRepository payrollMonthlyRecordRepository;
@@ -244,6 +260,9 @@ public class PayrollBatchComputationService {
     private final EmployeeSuspensionRecordRepository suspensionRecordRepository;
     private final EmployeeSuspensionNecRepository suspensionNecRepository;
     private final EmployeeDeputationRecordRepository deputationRecordRepository;
+    private final PayrollQueryService payrollQueryService;
+    private final CpfLoanPayrollRecoveryResolverService cpfLoanPayrollRecoveryResolverService;
+    private final JciEccsPayrollRecoveryResolverService jciEccsPayrollRecoveryResolverService;
 
     public PayrollBatchComputationService(PayrollBatchRepository payrollBatchRepository,
                                            PayrollMonthlyRecordRepository payrollMonthlyRecordRepository,
@@ -268,7 +287,10 @@ public class PayrollBatchComputationService {
                                            EmployeeCeaClaimRepository ceaClaimRepository,
                                            EmployeeSuspensionRecordRepository suspensionRecordRepository,
                                            EmployeeSuspensionNecRepository suspensionNecRepository,
-                                           EmployeeDeputationRecordRepository deputationRecordRepository) {
+                                           EmployeeDeputationRecordRepository deputationRecordRepository,
+                                           PayrollQueryService payrollQueryService,
+                                           CpfLoanPayrollRecoveryResolverService cpfLoanPayrollRecoveryResolverService,
+                                           JciEccsPayrollRecoveryResolverService jciEccsPayrollRecoveryResolverService) {
         this.payrollBatchRepository = payrollBatchRepository;
         this.payrollMonthlyRecordRepository = payrollMonthlyRecordRepository;
         this.payrollMonthlyHeadItemRepository = payrollMonthlyHeadItemRepository;
@@ -293,6 +315,9 @@ public class PayrollBatchComputationService {
         this.suspensionRecordRepository = suspensionRecordRepository;
         this.suspensionNecRepository = suspensionNecRepository;
         this.deputationRecordRepository = deputationRecordRepository;
+        this.payrollQueryService = payrollQueryService;
+        this.cpfLoanPayrollRecoveryResolverService = cpfLoanPayrollRecoveryResolverService;
+        this.jciEccsPayrollRecoveryResolverService = jciEccsPayrollRecoveryResolverService;
     }
 
     /** An inclusive [start, end] span of calendar dates. */
@@ -327,8 +352,8 @@ public class PayrollBatchComputationService {
     }
 
     /** Employer-side statutory contributions for one employee-month - see resolveEmployerContributions(). Never added to grossAmount/totalDeductions; posted separately via persistEmployerContributions(), not payroll_monthly_head_items. */
-    private record EmployerContributions(BigDecimal epf, BigDecimal pension, BigDecimal nps) {
-        private static final EmployerContributions ZERO = new EmployerContributions(BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO);
+    private record EmployerContributions(BigDecimal epf, BigDecimal pension, BigDecimal nps, BigDecimal jcpf) {
+        private static final EmployerContributions ZERO = new EmployerContributions(BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO);
     }
 
     /** One employee's fully-computed heads for one batch, before persistence. */
@@ -353,6 +378,13 @@ public class PayrollBatchComputationService {
             BigDecimal accomWaterCharges,
             BigDecimal accomElectricCharges,
             BigDecimal tdsAmount,
+            BigDecimal cpfLoanPrincipalRecovery,
+            BigDecimal cpfLoanInterestRecovery,
+            BigDecimal jciEccsThrift,
+            BigDecimal jciEccsTermPrincipal,
+            BigDecimal jciEccsTermInterest,
+            BigDecimal jciEccsEmergencyPrincipal,
+            BigDecimal jciEccsEmergencyInterest,
             BigDecimal grossAmount,
             BigDecimal totalDeductions,
             BigDecimal netAmount,
@@ -365,9 +397,9 @@ public class PayrollBatchComputationService {
     @Transactional
     public PayrollBatch processBatch(Long batchId) {
         PayrollBatch batch = findBatchOrThrow(batchId);
-        if (batch.getStatus() != PayrollBatchStatus.DRAFT) {
+        if (batch.getStatus() != PayrollBatchStatus.DRAFT && batch.getStatus() != PayrollBatchStatus.CALCULATED) {
             throw new BusinessRuleViolationException(
-                    "Payroll batch " + batchId + " must be DRAFT to (re)compute but is " + batch.getStatus());
+                    "Payroll batch " + batchId + " must be DRAFT or CALCULATED to (re)compute but is " + batch.getStatus());
         }
 
         payrollMonthlyRecordRepository.deleteByBatch_Id(batchId);
@@ -443,6 +475,7 @@ public class PayrollBatchComputationService {
         batch.setTotalGross(totalGross);
         batch.setTotalDeductions(totalDeductions);
         batch.setTotalNet(totalNet);
+        batch.setStatus(PayrollBatchStatus.CALCULATED);
         return batch;
     }
 
@@ -753,15 +786,32 @@ public class PayrollBatchComputationService {
                 employee.isNpsEligible() && hasPran(employee));
         BigDecimal tdsAmount = round(tds.finalAmount());
 
+        // Part 13/14 - the CPF Trust loan recovery resolver runs alongside every other statutory
+        // deduction head computed here; RecoveryAmounts.ZERO for the overwhelming majority of employees
+        // who carry no CPF Trust loan, so this is a no-op for them.
+        var loanRecovery = cpfLoanPayrollRecoveryResolverService.resolve(employee, batch);
+
+        // JCIECCS collection snapshot resolver (spec section 3) - reads the already-LOCKED
+        // jcieccs_collection_detail row for this employee/batch, never recomputing loan schedules here;
+        // RecoveryAmounts.ZERO for every employee until a snapshot has actually been requested for this
+        // batch (POST /api/jcieccs/payroll/batches/{payrollRunId}/snapshot).
+        var jciEccsRecovery = jciEccsPayrollRecoveryResolverService.resolve(employee, batch);
+
         BigDecimal totalDeductions = cpfAmount.add(ptaxAmount).add(npsAmount).add(carUseRecovery).add(gisAmount).add(lwfAmount)
-                .add(accomLicenseFee).add(accomWaterCharges).add(accomElectricCharges).add(tdsAmount);
+                .add(accomLicenseFee).add(accomWaterCharges).add(accomElectricCharges).add(tdsAmount)
+                .add(loanRecovery.principal()).add(loanRecovery.interest())
+                .add(jciEccsRecovery.thrift()).add(jciEccsRecovery.termPrincipal()).add(jciEccsRecovery.termInterest())
+                .add(jciEccsRecovery.emergencyPrincipal()).add(jciEccsRecovery.emergencyInterest());
         BigDecimal netAmount = grossAmount.subtract(totalDeductions);
 
         BigDecimal lopDays = BigDecimal.valueOf(daysInMonth).subtract(slices.stream().map(EarningsSlice::days).reduce(BigDecimal.ZERO, BigDecimal::add));
 
         return new EmployeeComputation(lopDays, earnedBasicTotal, daByHead, daTotal, hraTotal, transportTotal, remoteAreaTotal,
                 encashmentAmount, ceaReimbursementAmount, deputationAllowanceAmount, cpfAmount, ptaxAmount, npsAmount, carUseRecovery, gisAmount, lwfAmount, accomLicenseFee, accomWaterCharges, accomElectricCharges,
-                tdsAmount, grossAmount, totalDeductions, netAmount, effectiveOffice,
+                tdsAmount, loanRecovery.principal(), loanRecovery.interest(),
+                jciEccsRecovery.thrift(), jciEccsRecovery.termPrincipal(), jciEccsRecovery.termInterest(),
+                jciEccsRecovery.emergencyPrincipal(), jciEccsRecovery.emergencyInterest(),
+                grossAmount, totalDeductions, netAmount, effectiveOffice,
                 latestSlice.fixation().getGradeScale().getScaleType(), encashments, employerContributions);
     }
 
@@ -810,6 +860,13 @@ public class PayrollBatchComputationService {
         addHeadItem(record, HEAD_ACCOM_WATER, computation.accomWaterCharges());
         addHeadItem(record, HEAD_ACCOM_ELECTRIC, computation.accomElectricCharges());
         addHeadItem(record, HEAD_TDS, computation.tdsAmount());
+        addHeadItem(record, HEAD_CPFLOAN_PRIN, computation.cpfLoanPrincipalRecovery());
+        addHeadItem(record, HEAD_CPFLOAN_INT, computation.cpfLoanInterestRecovery());
+        addHeadItem(record, HEAD_JCIECCS_THRIFT, computation.jciEccsThrift());
+        addHeadItem(record, HEAD_JCIECCS_TERM_PRIN, computation.jciEccsTermPrincipal());
+        addHeadItem(record, HEAD_JCIECCS_TERM_INT, computation.jciEccsTermInterest());
+        addHeadItem(record, HEAD_JCIECCS_EMCY_PRIN, computation.jciEccsEmergencyPrincipal());
+        addHeadItem(record, HEAD_JCIECCS_EMCY_INT, computation.jciEccsEmergencyInterest());
         return record;
     }
 
@@ -830,6 +887,7 @@ public class PayrollBatchComputationService {
         addStatutoryItem(record, STAT_HEAD_EMPLOYER_EPF, contributions.epf());
         addStatutoryItem(record, STAT_HEAD_EMPLOYER_PENSION, contributions.pension());
         addStatutoryItem(record, STAT_HEAD_EMPLOYER_NPS, contributions.nps());
+        addStatutoryItem(record, STAT_HEAD_EMPLOYER_JCPF, contributions.jcpf());
     }
 
     private void addStatutoryItem(PayrollMonthlyRecord record, int statHeadCount, BigDecimal amount) {
@@ -967,38 +1025,45 @@ public class PayrollBatchComputationService {
     }
 
     /**
-     * Employer-side EPF/EPS/NPS contributions - posted via persistEmployerContributions() to
-     * payroll_monthly_statutory_items, never to the employee's own payslip (see that method's
-     * javadoc). Ported from PayrollComputationService.computeEpfEps()'s real-EPFO-law formula (that
-     * class's own javadoc: "these rates/ceiling are real EPFO statutory law, not JCI policy"), with
-     * two changes: rates are sourced from payroll_statutory_parameters (falling back to the same
-     * hardcoded values that engine uses) instead of being hardcoded outright, and - the actual gap
-     * this method closes - eligibility is now checked at all:
-     * <ul>
-     *   <li>EPF/EPS (stat heads 1/4): gated on employee.isEpsEligible(). Employer's total matching
-     *   contribution mirrors CPF_EMP_RATE (12%) on Basic+DA, same as the employee's own rate; of that,
-     *   EPS_BASE_RATE (8.33%) on Basic+DA capped at EPS_WAGE_CEILING (₹15,000) is carved out as the
-     *   pension-fund portion (stat head 4), and the remainder is the EPF-equivalent portion (stat head
-     *   1). If additionally isEpsHigherPensionEligible() and Basic+DA exceeds the wage ceiling,
-     *   EPS_HIGHER_EXTRA_RATE (1.16%, the 2023 SC EPS-95 judgment rate) on the excess above the
-     *   ceiling is added on top of the pension-fund portion, as an additional employer outgo - not a
-     *   redistribution of the standard 12%.</li>
-     *   <li>NPS employer match (stat head 15): gated the same way as the Sec 80CCD(2) TDS exemption
-     *   estimate - isNpsEligible() AND hasPran() - rather than requiring an EmployeeNpsDeclaration,
-     *   since the employer's contribution rate is a fixed statutory rate, not tied to whatever
-     *   percentage the employee themselves elected to declare.</li>
-     * </ul>
-     * This EPF/EPS/NPS-employer stat-head mapping is this class's own reading of the
-     * payroll_statutory_heads catalog labels (see the STAT_HEAD_* constants' own javadoc) - verify
-     * against actual HR/Finance policy before relying on this for statutory compliance filing.
-     */
+ * Employer-side CPF/EPS/NPS contributions - posted via persistEmployerContributions() to
+ * payroll_monthly_statutory_items, never to the employee's own payslip (see that method's
+ * javadoc). Ported from PayrollComputationService.computeEpfEps()'s real-EPFO-law formula (that
+ * class's own javadoc: "these rates/ceiling are real EPFO statutory law, not JCI policy"), with
+ * two changes: rates are sourced from payroll_statutory_parameters (falling back to the same
+ * hardcoded values that engine uses) instead of being hardcoded outright, and - the actual gap
+ * this method closes - eligibility is now checked at all:
+ * <ul>
+ *   <li>CPF (stat head 1): unconditional - always equals computeCpf(Basic+DA), the same 12%
+ *   (CPF_EMP_RATE) figure mirrored onto the employee's own Head 27 CPF deduction. Never gated on
+ *   isEpsEligible() - every employee's CPF lands on stat head 1 regardless of EPS membership.</li>
+ *   <li>Pension (EPS, stat head 4): 0 unless isEpsEligible():
+ *     <ul>
+ *       <li><b>Standard EPS:</b> Below EPS_WAGE_CEILING (₹15,000), EPS_BASE_RATE (8.33%) of
+ *       Basic+DA is carved out as pension.</li>
+ *       <li><b>Higher Pension (isEpsHigherPensionEligible() & Basic+DA > ₹15,000):</b> As per the
+ *       SC EPS-95 ruling and MoLE notification (3 May 2023), EPS receives 8.33% up to the ceiling
+ *       plus 9.49% (8.33% + 1.16% EPS_HIGHER_EXTRA_RATE) on the wages exceeding ₹15,000. This is a
+ *       REDISTRIBUTION within the employee's fixed 12% CPF, not an extra outgo on top of it.</li>
+ *     </ul>
+ *   </li>
+ *   <li>JCPF (stat head 3): unconditional - always CPF minus Pension (stat head 1 - stat head 4),
+ *   computed after pension's higher-pension bump so that redistribution is reflected here too. For
+ *   a non-EPS-eligible employee (pension = 0) the employee's entire CPF lands on JCPF - this is the
+ *   JCI Trust's own scheme absorbing the whole contribution when EPFO's EPS/EPF doesn't apply, so it
+ *   must never be silently dropped to zero alongside pension.</li>
+ *   <li>NPS employer match (stat head 15): gated the same way as the Sec 80CCD(2) TDS exemption
+ *   estimate - isNpsEligible() AND hasPran() - rather than requiring an EmployeeNpsDeclaration,
+ *   since the employer's contribution rate is a fixed statutory rate, not tied to whatever
+ *   percentage the employee themselves elected to declare.</li>
+ * </ul>
+ * This CPF/EPS/NPS-employer stat-head mapping is this class's own reading of the
+ * payroll_statutory_heads catalog labels (see the STAT_HEAD_* constants' own javadoc) - verify
+ * against actual HR/Finance policy before relying on this for statutory compliance filing.
+ */
+
     private EmployerContributions resolveEmployerContributions(Employee employee, BigDecimal basicPlusDa) {
-        BigDecimal epf = BigDecimal.ZERO;
         BigDecimal pension = BigDecimal.ZERO;
         if (employee.isEpsEligible()) {
-            BigDecimal employerTotalRate = payrollStatutoryParameterRepository.findByParamKeyAndEffectiveToIsNull("CPF_EMP_RATE")
-                    .map(PayrollStatutoryParameter::getParamValue)
-                    .orElse(DEFAULT_CPF_EMPLOYEE_RATE);
             BigDecimal epsBaseRate = payrollStatutoryParameterRepository.findByParamKeyAndEffectiveToIsNull("EPS_BASE_RATE")
                     .map(PayrollStatutoryParameter::getParamValue)
                     .orElse(DEFAULT_EPS_BASE_RATE);
@@ -1006,10 +1071,8 @@ public class PayrollBatchComputationService {
                     .map(PayrollStatutoryParameter::getParamValue)
                     .orElse(DEFAULT_EPS_WAGE_CEILING);
 
-            BigDecimal employerTotal = round(basicPlusDa.multiply(employerTotalRate).divide(HUNDRED, 10, RoundingMode.HALF_UP));
             BigDecimal epsWageBase = basicPlusDa.min(epsWageCeiling);
             pension = round(epsWageBase.multiply(epsBaseRate).divide(HUNDRED, 10, RoundingMode.HALF_UP));
-            epf = employerTotal.subtract(pension);
 
             if (employee.isEpsHigherPensionEligible() && basicPlusDa.compareTo(epsWageCeiling) > 0) {
                 BigDecimal epsHigherExtraRate = payrollStatutoryParameterRepository.findByParamKeyAndEffectiveToIsNull("EPS_HIGHER_EXTRA_RATE")
@@ -1028,10 +1091,19 @@ public class PayrollBatchComputationService {
             nps = round(basicPlusDa.multiply(npsEmployerRate).divide(HUNDRED, 10, RoundingMode.HALF_UP));
         }
 
-        if (epf.signum() == 0 && pension.signum() == 0 && nps.signum() == 0) {
+        // CPF (stat head 1) - unconditional, mirrors the employee's own Head 27 CPF deduction exactly
+        // (same rate source, same base), never gated on isEpsEligible().
+        BigDecimal epf = computeCpf(basicPlusDa);
+
+        // JCPF (stat head 3) - whatever of the employee's CPF isn't diverted to pension. Unconditional
+        // (computed here, outside the isEpsEligible() branch above) so a non-EPS-eligible employee's
+        // full CPF still lands on JCPF instead of being dropped - see this method's own javadoc.
+        BigDecimal jcpf = epf.subtract(pension);
+
+        if (epf.signum() == 0 && pension.signum() == 0 && nps.signum() == 0 && jcpf.signum() == 0) {
             return EmployerContributions.ZERO;
         }
-        return new EmployerContributions(epf, pension, nps);
+        return new EmployerContributions(epf, pension, nps, jcpf);
     }
 
     /**
@@ -1100,9 +1172,9 @@ public class PayrollBatchComputationService {
     @Transactional
     public PayrollBatch finalizeBatch(Long batchId, Long finalizedByEmployeeId) {
         PayrollBatch batch = findBatchOrThrow(batchId);
-        if (batch.getStatus() != PayrollBatchStatus.DRAFT) {
+        if (batch.getStatus() != PayrollBatchStatus.CALCULATED) {
             throw new BusinessRuleViolationException(
-                    "Payroll batch " + batchId + " must be DRAFT to finalize but is " + batch.getStatus());
+                    "Payroll batch " + batchId + " must be CALCULATED to finalize but is " + batch.getStatus());
         }
         if (payrollMonthlyRecordRepository.findByBatch_Id(batchId).isEmpty()) {
             throw new BusinessRuleViolationException(
@@ -1142,7 +1214,8 @@ public class PayrollBatchComputationService {
 
         return new PayrollMonthlyRecordResponse(record.getTranId(), record.getEmpCode(), record.getEmployee().getFullName(),
                 record.getMonth(), record.getYear(), record.getBasicPay(), record.getGrossAmount(), record.getTotalDeductions(),
-                record.getNetAmount(), record.isSalaryHeld(), encashmentAmount, tdsAmount, tdsOverridden, items);
+                record.getNetAmount(), record.isSalaryHeld(), encashmentAmount, tdsAmount, tdsOverridden, items,
+                payrollQueryService.fullHeadLines(record.getTranId()));
     }
 
     private BigDecimal amountForHead(List<PayrollMonthlyHeadItemResponse> items, int headCount) {

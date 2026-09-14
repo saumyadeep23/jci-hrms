@@ -9,6 +9,8 @@ public enum CpfLedgerEntryType {
     LOAN_WITHDRAWAL,
     LOAN_REPAYMENT,
     ANNUAL_INTEREST,
+    /** Reverses a previously-posted ANNUAL_INTEREST run without deleting it - see CpfInterestRunService.reverseRun(). */
+    ANNUAL_INTEREST_REVERSAL,
     /** Mid-year interest crystallization on exit (superannuation/resignation/death/transfer-out) - see CpfInterestComputationService.crystallizeInterimInterest(). */
     INTERIM_SETTLEMENT_INTEREST,
     FINAL_SETTLEMENT

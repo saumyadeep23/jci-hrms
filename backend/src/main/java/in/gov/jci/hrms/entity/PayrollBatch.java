@@ -55,6 +55,13 @@ public class PayrollBatch implements Auditable {
     @Column(name = "status", nullable = false, length = 30)
     private PayrollBatchStatus status = PayrollBatchStatus.DRAFT;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "batch_type", nullable = false, length = 20)
+    private PayrollBatchType batchType = PayrollBatchType.REGULAR;
+
+    @Column(name = "pay_date")
+    private java.time.LocalDate payDate;
+
     @Column(name = "total_employees", nullable = false)
     private int totalEmployees;
 
@@ -134,6 +141,22 @@ public class PayrollBatch implements Auditable {
 
     public void setStatus(PayrollBatchStatus status) {
         this.status = status;
+    }
+
+    public PayrollBatchType getBatchType() {
+        return batchType;
+    }
+
+    public void setBatchType(PayrollBatchType batchType) {
+        this.batchType = batchType;
+    }
+
+    public java.time.LocalDate getPayDate() {
+        return payDate;
+    }
+
+    public void setPayDate(java.time.LocalDate payDate) {
+        this.payDate = payDate;
     }
 
     public int getTotalEmployees() {

@@ -11,6 +11,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.lang.NonNull;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -53,6 +54,11 @@ public interface EmployeeRepository extends JpaRepository<Employee, Long>, JpaSp
     /** PayrollBatchComputationService.processBatch()'s "active employees eligible for payroll" source set - see its javadoc for why status alone (plus a current RegularPayFixation, checked per-employee) is the eligibility gate. */
     @EntityGraph(attributePaths = {"regionalOffice", "designation", "department"})
     List<Employee> findByStatus(EmployeeStatus status);
+
+    /** Batch-fetch for JciEccsMemberService (JciEccsMember only stores a plain employee_id Long, no
+     * JPA association) - eager RO/DPC avoids N+1 when resolving each member's place-of-posting string. */
+    @EntityGraph(attributePaths = {"regionalOffice", "departmentalPurchaseCentre"})
+    List<Employee> findByIdIn(Collection<Long> ids);
 
     /**
      * PIMS_SPEC.md Feature 1's exact "current highest numeric employee_code

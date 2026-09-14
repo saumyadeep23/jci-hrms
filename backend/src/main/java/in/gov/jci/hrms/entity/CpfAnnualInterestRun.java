@@ -1,7 +1,10 @@
 package in.gov.jci.hrms.entity;
 
+import in.gov.jci.hrms.audit.Auditable;
+import in.gov.jci.hrms.audit.AuditableEntityListener;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EntityListeners;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
@@ -15,22 +18,26 @@ import jakarta.persistence.Table;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
- * One year-end summary row per financial year - maps onto cpf_annual_interest_runs, a table already live
- * on the shared dev database (see V74's own header comment); fin_year is UNIQUE there, so a corrected
- * re-run must update this same row (e.g. moving it to SUPERSEDED) rather than inserting a second row for
- * the same FY - CpfInterestComputationService.computeAnnualInterest() enforces that.
+ * One CPF annual-interest run - maps onto cpf_annual_interest_runs (V74, extended by V81 for the full
+ * Calculate -> Approve/Post -> Reverse -> Recalculate workflow - see CpfInterestRunService's own javadoc).
+ * fin_year is no longer globally UNIQUE (V81 replaced that with two partial unique indexes: at most one
+ * *active* - i.e. not REVERSED/FAILED - run per fin_year+scope(+member)), so a fin_year can carry a history
+ * of superseded runs across time as long as at most one is active.
  */
 @Entity
 @Table(name = "cpf_annual_interest_runs")
-public class CpfAnnualInterestRun {
+@EntityListeners(AuditableEntityListener.class)
+public class CpfAnnualInterestRun implements Auditable {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "fin_year", nullable = false, unique = true, length = 9)
+    @Column(name = "fin_year", nullable = false, length = 9)
     private String finYear;
 
     @Column(name = "declared_interest_rate", nullable = false, precision = 5, scale = 2)
@@ -59,7 +66,22 @@ public class CpfAnnualInterestRun {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20, columnDefinition = "VARCHAR")
-    private CpfInterestRunStatus status = CpfInterestRunStatus.DRAFT;
+    private CpfInterestRunStatus status = CpfInterestRunStatus.CALCULATED;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "scope", nullable = false, length = 20, columnDefinition = "VARCHAR")
+    private CpfInterestRunScope scope = CpfInterestRunScope.ALL_MEMBERS;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "member_employee_id")
+    private Employee memberEmployee;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "calculated_by")
+    private Employee calculatedBy;
+
+    @Column(name = "calculated_at")
+    private Instant calculatedAt;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "posted_by")
@@ -67,6 +89,20 @@ public class CpfAnnualInterestRun {
 
     @Column(name = "posted_at")
     private Instant postedAt;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "reversed_by")
+    private Employee reversedBy;
+
+    @Column(name = "reversed_at")
+    private Instant reversedAt;
+
+    /** True when calculatePreview() found a member whose pre-migration opening-balance basis could not be confirmed (see CpfInterestRunService.flagDataReviewRequired()) - posting requires the caller to pass acknowledgeDataReview=true. */
+    @Column(name = "data_review_required", nullable = false)
+    private boolean dataReviewRequired;
+
+    @Column(name = "remarks")
+    private String remarks;
 
     protected CpfAnnualInterestRun() {
     }
@@ -142,6 +178,38 @@ public class CpfAnnualInterestRun {
         this.status = status;
     }
 
+    public CpfInterestRunScope getScope() {
+        return scope;
+    }
+
+    public void setScope(CpfInterestRunScope scope) {
+        this.scope = scope;
+    }
+
+    public Employee getMemberEmployee() {
+        return memberEmployee;
+    }
+
+    public void setMemberEmployee(Employee memberEmployee) {
+        this.memberEmployee = memberEmployee;
+    }
+
+    public Employee getCalculatedBy() {
+        return calculatedBy;
+    }
+
+    public void setCalculatedBy(Employee calculatedBy) {
+        this.calculatedBy = calculatedBy;
+    }
+
+    public Instant getCalculatedAt() {
+        return calculatedAt;
+    }
+
+    public void setCalculatedAt(Instant calculatedAt) {
+        this.calculatedAt = calculatedAt;
+    }
+
     public Employee getPostedBy() {
         return postedBy;
     }
@@ -156,5 +224,70 @@ public class CpfAnnualInterestRun {
 
     public void setPostedAt(Instant postedAt) {
         this.postedAt = postedAt;
+    }
+
+    public Employee getReversedBy() {
+        return reversedBy;
+    }
+
+    public void setReversedBy(Employee reversedBy) {
+        this.reversedBy = reversedBy;
+    }
+
+    public Instant getReversedAt() {
+        return reversedAt;
+    }
+
+    public void setReversedAt(Instant reversedAt) {
+        this.reversedAt = reversedAt;
+    }
+
+    public boolean isDataReviewRequired() {
+        return dataReviewRequired;
+    }
+
+    public void setDataReviewRequired(boolean dataReviewRequired) {
+        this.dataReviewRequired = dataReviewRequired;
+    }
+
+    public String getRemarks() {
+        return remarks;
+    }
+
+    public void setRemarks(String remarks) {
+        this.remarks = remarks;
+    }
+
+    @Override
+    public String auditEntityName() {
+        return "CpfAnnualInterestRun";
+    }
+
+    @Override
+    public Long auditEntityId() {
+        return id;
+    }
+
+    @Override
+    public Map<String, Object> auditSnapshot() {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("finYear", finYear);
+        snapshot.put("scope", scope);
+        snapshot.put("memberEmployeeId", memberEmployee != null ? memberEmployee.getId() : null);
+        snapshot.put("declaredInterestRate", declaredInterestRate);
+        snapshot.put("totalMembersProcessed", totalMembersProcessed);
+        snapshot.put("totalInterestCreditedEe", totalInterestCreditedEe);
+        snapshot.put("totalInterestCreditedEr", totalInterestCreditedEr);
+        snapshot.put("totalInterestCreditedVpf", totalInterestCreditedVpf);
+        snapshot.put("status", status);
+        snapshot.put("dataReviewRequired", dataReviewRequired);
+        snapshot.put("calculatedByEmployeeId", calculatedBy != null ? calculatedBy.getId() : null);
+        snapshot.put("calculatedAt", calculatedAt);
+        snapshot.put("postedByEmployeeId", postedBy != null ? postedBy.getId() : null);
+        snapshot.put("postedAt", postedAt);
+        snapshot.put("reversedByEmployeeId", reversedBy != null ? reversedBy.getId() : null);
+        snapshot.put("reversedAt", reversedAt);
+        snapshot.put("remarks", remarks);
+        return snapshot;
     }
 }

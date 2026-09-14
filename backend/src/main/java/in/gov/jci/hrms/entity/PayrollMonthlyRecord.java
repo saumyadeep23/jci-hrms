@@ -44,7 +44,7 @@ public class PayrollMonthlyRecord {
     @Column(name = "loc_code", length = 20)
     private String locCode;
 
-    @Column(name = "desgn_code", length = 20)
+    @Column(name = "desgn_code", length = 100)
     private String desgnCode;
 
     @Column(name = "city_class", length = 5)

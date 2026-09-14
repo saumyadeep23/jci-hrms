@@ -18,5 +18,6 @@ public record PayrollMonthlyRecordResponse(
         BigDecimal leaveEncashmentAmount,
         BigDecimal tdsAmount,
         boolean tdsOverridden,
-        List<PayrollMonthlyHeadItemResponse> headItems) {
+        List<PayrollMonthlyHeadItemResponse> headItems,
+        List<PayrollHeadLineResponse> fullHeadLines) {
 }

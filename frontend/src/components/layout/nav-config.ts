@@ -18,9 +18,13 @@ import {
   Landmark,
   LayoutDashboard,
   LayoutGrid,
+  ListChecks,
   MoveRight,
+  PiggyBank,
   ReceiptText,
+  Scale,
   ScrollText,
+  ShieldAlert,
   ShieldCheck,
   TrendingUp,
   UploadCloud,
@@ -75,6 +79,12 @@ const SUPER_ADMIN: Role[] = ['SUPER_ADMIN']
 const PAYROLL_MASTER_ROLES: Role[] = ['HR_ADMIN', 'BILL_SUPERVISOR', 'FINANCE_ADMIN']
 /** Matches CpfTrustController/CpfLoanController's own @PreAuthorize exactly. */
 const CPF_TRUST_ROLES: Role[] = ['FINANCE_ADMIN', 'CPF_ADMIN', 'SUPER_ADMIN']
+/** Matches JciEccsLoanController/JciEccsMemberController/JciEccsPayrollBatchController's own @PreAuthorize exactly. */
+const JCIECCS_ROLES: Role[] = ['COOP_ADMIN', 'FINANCE_ADMIN', 'SUPER_ADMIN']
+/** Matches JciEccsMigrationController's own @PreAuthorize exactly (narrower than JCIECCS_ROLES - no FINANCE_ADMIN). */
+const JCIECCS_MIGRATION_ROLES: Role[] = ['COOP_ADMIN', 'SUPER_ADMIN']
+/** Separation/no-dues clearance is an HR-owned process as much as a co-op one - widened beyond JCIECCS_ROLES. Backed by JciEccsSettlementController, which itself only accepts JCIECCS_ROLES - HR_ADMIN can view/reach the page but the underlying API calls still enforce the narrower set. */
+const JCIECCS_SETTLEMENT_ROLES: Role[] = ['HR_ADMIN', 'COOP_ADMIN', 'FINANCE_ADMIN', 'SUPER_ADMIN']
 
 /**
  * The full sidebar, top to bottom: flat ESS self-service items first
@@ -103,6 +113,7 @@ export const NAV_ENTRIES: NavEntry[] = [
   { to: '/attendance', label: 'Attendance & Facial Punch', icon: Camera, roles: ALL_STAFF, primary: true, essDefault: true },
   { to: '/leaves', label: 'Leave Management', icon: CalendarCheck, roles: ALL_STAFF, primary: true, essDefault: true },
   { to: '/payslips', label: 'My Payslips', icon: Wallet, roles: ALL_STAFF, primary: true, essDefault: true },
+  { to: '/ess/salary-slips', label: 'Salary Slip History', icon: ScrollText, roles: ALL_STAFF, essDefault: true },
   { to: '/service-book', label: 'e-Service Book & Career Timeline', icon: History, roles: ALL_STAFF, essDefault: true, requiresEmploymentCategory: 'REGULAR' },
   { to: '/my-transfers', label: 'My Transfers & Promotions', icon: MoveRight, roles: ALL_STAFF, essDefault: true },
   { to: '/apar', label: 'APAR Evaluation', icon: ClipboardCheck, roles: ALL_STAFF, essDefault: true },
@@ -111,7 +122,12 @@ export const NAV_ENTRIES: NavEntry[] = [
   { to: '/self-service/cea-claims', label: 'CEA / Hostel Subsidy', icon: GraduationCap, roles: ALL_STAFF, essDefault: true },
 
   { to: '/profile', label: 'Profile', icon: User, roles: ALL_STAFF, primary: true, essDefault: true },
-  { to: '/pf-statement', label: 'PF Statement', icon: Coins, roles: ALL_STAFF },
+  { to: '/pf-statement', label: 'CPF Passbook', icon: Coins, roles: ALL_STAFF },
+  // Task 4 - member-facing, read-only eligibility/ceiling/repayment simulator plus the "Apply for this
+  // Loan" handoff into ApplyCpfLoanModal (lockedEmployee = self). Deliberately a flat ALL_STAFF entry here
+  // rather than nested under the "CPF Trust" admin group below (whose roles gate every sibling item to
+  // CPF_TRUST_ROLES) - CPF_TRUST_ROLES admins can still reach it directly by URL, same as any ALL_STAFF page.
+  { to: '/ess/cpf/loan-simulator', label: 'CPF Loans & Advances Simulator', icon: HandCoins, roles: ALL_STAFF },
   { to: '/form16', label: 'Form-16', icon: ReceiptText, roles: ALL_STAFF },
 
   {
@@ -184,11 +200,62 @@ export const NAV_ENTRIES: NavEntry[] = [
     icon: Landmark,
     roles: CPF_TRUST_ROLES,
     children: [
-      { to: '/payroll/trust/members', label: "Members' List", icon: Landmark, roles: CPF_TRUST_ROLES },
+      { to: '/payroll/trust/members', label: 'CPF Trust Members', icon: Landmark, roles: CPF_TRUST_ROLES },
       { to: '/payroll/trust/passbook', label: 'CPF Passbook', icon: Landmark, roles: CPF_TRUST_ROLES },
       { to: '/payroll/trust/interest-rates', label: 'CPF Rate of Interest Entry', icon: Landmark, roles: CPF_TRUST_ROLES },
+      { to: '/payroll/trust/interest-management', label: 'CPF Interest Management', icon: Landmark, roles: CPF_TRUST_ROLES },
+      { to: '/payroll/trust/withdrawal-rules', label: 'CPF Withdrawal Rule Engine', icon: Landmark, roles: CPF_TRUST_ROLES },
       { to: '/payroll/trust/incoming-transfers', label: 'Incoming Fund Transfers', icon: Landmark, roles: CPF_TRUST_ROLES },
       { to: '/payroll/trust/loans', label: 'CPF Loans & Advances', icon: HandCoins, roles: CPF_TRUST_ROLES },
+      { to: '/admin/cpf/disputes', label: 'CPF Transaction Disputes', icon: Gavel, roles: CPF_TRUST_ROLES },
+    ],
+  },
+
+  // Co-operative (JCIECCS) - four sibling groups rather than one 3-level "Co-operative" parent with
+  // nested sub-categories, since NavGroup only supports one level of children (group -> flat items,
+  // same constraint CPF Trust/Payroll Masters/PIMS Workspace are all built around above) - splitting by
+  // function (Members & Thrift / Loan Servicing / Payroll & Recovery / Settlement & Clearance) mirrors
+  // how e.g. "Attendance & Shifts" and "Leave Management" stay separate groups rather than nesting under
+  // one artificial "HR Admin" parent.
+  { to: '/jcieccs', label: 'Co-op: Overview', icon: LayoutDashboard, roles: JCIECCS_ROLES },
+  {
+    label: 'Co-op: Members & Thrift',
+    icon: Landmark,
+    roles: JCIECCS_ROLES,
+    children: [
+      { to: '/jcieccs/members/directory', label: 'Member Directory', icon: Users, roles: JCIECCS_ROLES },
+      { to: '/jcieccs/members/thrift-ledger', label: 'Thrift Fund Ledger', icon: PiggyBank, roles: JCIECCS_ROLES },
+      { to: '/jcieccs/members/staging', label: 'Migration / Staging', icon: UploadCloud, roles: JCIECCS_MIGRATION_ROLES },
+    ],
+  },
+  {
+    label: 'Co-op: Loan Servicing',
+    icon: HandCoins,
+    roles: JCIECCS_ROLES,
+    children: [
+      { to: '/jcieccs/loans/active', label: 'Active Loans', icon: ListChecks, roles: JCIECCS_ROLES },
+      { to: '/jcieccs/loans/apply', label: 'New Loan Application & Disbursal', icon: FileSignature, roles: JCIECCS_ROLES },
+      { to: '/jcieccs/loans/restructure', label: 'Restructure & Top-up', icon: TrendingUp, roles: JCIECCS_ROLES },
+      { to: '/jcieccs/loans/cash-repayment', label: 'Cash Repayments', icon: Banknote, roles: JCIECCS_ROLES },
+    ],
+  },
+  {
+    label: 'Co-op: Payroll & Recovery',
+    icon: ScrollText,
+    roles: JCIECCS_ROLES,
+    children: [
+      { to: '/jcieccs/payroll-recovery/demands', label: 'Monthly Demand Schedules', icon: ClipboardCheck, roles: JCIECCS_ROLES },
+      { to: '/jcieccs/payroll-recovery/reconciliation', label: 'Deduction Reconciliation', icon: BarChart3, roles: JCIECCS_ROLES },
+      { to: '/jcieccs/payroll-recovery/audit-trail', label: 'Priority Cascade Audit Trail', icon: History, roles: JCIECCS_ROLES },
+      { to: '/jcieccs/payroll-recovery/integrity-check', label: 'Integrity Checker', icon: ShieldAlert, roles: JCIECCS_ROLES },
+    ],
+  },
+  {
+    label: 'Co-op: Settlement & Clearance',
+    icon: Scale,
+    roles: JCIECCS_SETTLEMENT_ROLES,
+    children: [
+      { to: '/jcieccs/settlement/no-dues', label: 'Separation Clearance', icon: Scale, roles: JCIECCS_SETTLEMENT_ROLES },
     ],
   },
 

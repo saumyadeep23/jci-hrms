@@ -93,6 +93,20 @@ public class GlobalExceptionHandler {
                 .body(ErrorResponse.of(HttpStatus.CONFLICT.value(), "Conflict", ex.getMessage()));
     }
 
+    /** More specific than BusinessRuleViolationException (its supertype) - same pattern as handlePredecessorPayrollUnfinalized. */
+    @ExceptionHandler(DuplicateDisputeException.class)
+    public ResponseEntity<ErrorResponse> handleDuplicateDispute(DuplicateDisputeException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ErrorResponse.of(HttpStatus.CONFLICT.value(), "Conflict", ex.getMessage()));
+    }
+
+    /** More specific than BusinessRuleViolationException (its supertype) - same pattern as handlePredecessorPayrollUnfinalized. Covers both this app's own explicit expectedVersion check (CpfTransactionDisputeService) and a raw Hibernate optimistic-lock failure, should one ever surface here instead. */
+    @ExceptionHandler({ConcurrencyConflictException.class, org.springframework.orm.ObjectOptimisticLockingFailureException.class})
+    public ResponseEntity<ErrorResponse> handleConcurrencyConflict(RuntimeException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ErrorResponse.of(HttpStatus.CONFLICT.value(), "Conflict", "This record has been updated by another user. Please refresh."));
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ErrorResponse> handleValidation(MethodArgumentNotValidException ex) {
         List<FieldError> fieldErrors = ex.getBindingResult().getFieldErrors();

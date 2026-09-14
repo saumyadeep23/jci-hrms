@@ -11,6 +11,8 @@ public record CpfPassbookResponseDto(
         BigDecimal ledgerBalance,
         BigDecimal accruedInterestFytd,
         BigDecimal effectiveTotalCorpus,
+        /** Current Outstanding Refundable Loan Balance (running_loan_cpf_balance on the member's latest ledger row, across all financial years) - 0 if no CPF Trust loan has ever been disbursed. */
+        BigDecimal outstandingLoanBalance,
         BigDecimal rateApplied,
         String rateSourceFinYear,
         boolean isProvisionalRate,

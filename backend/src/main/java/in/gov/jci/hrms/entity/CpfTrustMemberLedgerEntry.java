@@ -101,6 +101,42 @@ public class CpfTrustMemberLedgerEntry {
     @Column(name = "running_total_balance", nullable = false, precision = 14, scale = 2)
     private BigDecimal runningTotalBalance;
 
+    /** Refundable Loan disbursed this row (debits EE) - see CpfLoanApplicationService.disburseLoan(). */
+    @Column(name = "sanc_cpf_loan", nullable = false, precision = 12, scale = 2)
+    private BigDecimal sancCpfLoan = BigDecimal.ZERO;
+
+    /** Non-Refundable Withdrawal disbursed this row, split by fund - see CpfLoanApplicationService.disburseLoan(). */
+    @Column(name = "sanc_nrw_ee", nullable = false, precision = 12, scale = 2)
+    private BigDecimal sancNrwEe = BigDecimal.ZERO;
+
+    @Column(name = "sanc_nrw_er", nullable = false, precision = 12, scale = 2)
+    private BigDecimal sancNrwEr = BigDecimal.ZERO;
+
+    @Column(name = "sanc_nrw_vpf", nullable = false, precision = 12, scale = 2)
+    private BigDecimal sancNrwVpf = BigDecimal.ZERO;
+
+    /** Refundable Loan principal repaid this row (credits EE) - see CpfLedgerSyncService/CpfLoanSettlementService. */
+    @Column(name = "loan_repay_principal", nullable = false, precision = 12, scale = 2)
+    private BigDecimal loanRepayPrincipal = BigDecimal.ZERO;
+
+    /** Refundable Loan interest repaid this row - credited to EE per the Member CPF Passbook's accounting rule. */
+    @Column(name = "loan_repay_interest", nullable = false, precision = 12, scale = 2)
+    private BigDecimal loanRepayInterest = BigDecimal.ZERO;
+
+    /** Outstanding Refundable Loan balance after this row - carried forward and adjusted the same way runningEeBalance is. */
+    @Column(name = "running_loan_cpf_balance", nullable = false, precision = 14, scale = 2)
+    private BigDecimal runningLoanCpfBalance = BigDecimal.ZERO;
+
+    /** Cumulative Non-Refundable Withdrawals taken from each fund to date - never reduced, since NRW is never repaid. */
+    @Column(name = "running_nrw_ee_balance", nullable = false, precision = 14, scale = 2)
+    private BigDecimal runningNrwEeBalance = BigDecimal.ZERO;
+
+    @Column(name = "running_nrw_er_balance", nullable = false, precision = 14, scale = 2)
+    private BigDecimal runningNrwErBalance = BigDecimal.ZERO;
+
+    @Column(name = "running_nrw_vpf_balance", nullable = false, precision = 14, scale = 2)
+    private BigDecimal runningNrwVpfBalance = BigDecimal.ZERO;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "payroll_run_id")
     private PayrollRun payrollRun;
@@ -112,6 +148,11 @@ public class CpfTrustMemberLedgerEntry {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "loan_id")
     private CpfLoanApplication loan;
+
+    /** The CpfAnnualInterestRun that produced this row (an ANNUAL_INTEREST credit) or reversed one (an ANNUAL_INTEREST_REVERSAL debit) - see CpfInterestRunService.reverseRun(). Null for every other entry type. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "interest_run_id")
+    private CpfAnnualInterestRun interestRun;
 
     /** Para 60(2), EPF Scheme: true when rateApplied/rateSourceFinYear come from the preceding FY because this FY's rate isn't notified yet - see CpfRateResolutionService. */
     @Column(name = "is_provisional_rate", nullable = false)
@@ -271,6 +312,111 @@ public class CpfTrustMemberLedgerEntry {
 
     public BigDecimal getRunningTotalBalance() {
         return runningTotalBalance;
+    }
+
+    /**
+     * Offsets this row's own running EE/ER/VPF/total balances by a fixed delta - used only by
+     * CpfInterestRunService's cascade (Part 18 of the module spec) to push a newly-inserted historical
+     * ANNUAL_INTEREST (or its later ANNUAL_INTEREST_REVERSAL) credit through every ledger row this member
+     * already has AFTER the insertion date. Applying the SAME delta to all four columns (with
+     * deltaTotal = deltaEe+deltaEr+deltaVpf, never the caller's own already-rounded statutory total)
+     * preserves this row's own EE+ER+VPF=Total invariant regardless of the delta's rounding. Never touches
+     * this row's own credit/debit amount columns (Part 18: "preserve original transaction amounts") or its
+     * loan/NRW running balances, which interest crediting never affects.
+     */
+    public void applyRunningBalanceCascadeOffset(BigDecimal deltaEe, BigDecimal deltaEr, BigDecimal deltaVpf) {
+        this.runningEeBalance = this.runningEeBalance.add(deltaEe);
+        this.runningErBalance = this.runningErBalance.add(deltaEr);
+        this.runningVpfBalance = this.runningVpfBalance.add(deltaVpf);
+        this.runningTotalBalance = this.runningTotalBalance.add(deltaEe).add(deltaEr).add(deltaVpf);
+    }
+
+    public CpfAnnualInterestRun getInterestRun() {
+        return interestRun;
+    }
+
+    public void setInterestRun(CpfAnnualInterestRun interestRun) {
+        this.interestRun = interestRun;
+    }
+
+    public BigDecimal getSancCpfLoan() {
+        return sancCpfLoan;
+    }
+
+    public void setSancCpfLoan(BigDecimal sancCpfLoan) {
+        this.sancCpfLoan = sancCpfLoan;
+    }
+
+    public BigDecimal getSancNrwEe() {
+        return sancNrwEe;
+    }
+
+    public void setSancNrwEe(BigDecimal sancNrwEe) {
+        this.sancNrwEe = sancNrwEe;
+    }
+
+    public BigDecimal getSancNrwEr() {
+        return sancNrwEr;
+    }
+
+    public void setSancNrwEr(BigDecimal sancNrwEr) {
+        this.sancNrwEr = sancNrwEr;
+    }
+
+    public BigDecimal getSancNrwVpf() {
+        return sancNrwVpf;
+    }
+
+    public void setSancNrwVpf(BigDecimal sancNrwVpf) {
+        this.sancNrwVpf = sancNrwVpf;
+    }
+
+    public BigDecimal getLoanRepayPrincipal() {
+        return loanRepayPrincipal;
+    }
+
+    public void setLoanRepayPrincipal(BigDecimal loanRepayPrincipal) {
+        this.loanRepayPrincipal = loanRepayPrincipal;
+    }
+
+    public BigDecimal getLoanRepayInterest() {
+        return loanRepayInterest;
+    }
+
+    public void setLoanRepayInterest(BigDecimal loanRepayInterest) {
+        this.loanRepayInterest = loanRepayInterest;
+    }
+
+    public BigDecimal getRunningLoanCpfBalance() {
+        return runningLoanCpfBalance;
+    }
+
+    public void setRunningLoanCpfBalance(BigDecimal runningLoanCpfBalance) {
+        this.runningLoanCpfBalance = runningLoanCpfBalance;
+    }
+
+    public BigDecimal getRunningNrwEeBalance() {
+        return runningNrwEeBalance;
+    }
+
+    public void setRunningNrwEeBalance(BigDecimal runningNrwEeBalance) {
+        this.runningNrwEeBalance = runningNrwEeBalance;
+    }
+
+    public BigDecimal getRunningNrwErBalance() {
+        return runningNrwErBalance;
+    }
+
+    public void setRunningNrwErBalance(BigDecimal runningNrwErBalance) {
+        this.runningNrwErBalance = runningNrwErBalance;
+    }
+
+    public BigDecimal getRunningNrwVpfBalance() {
+        return runningNrwVpfBalance;
+    }
+
+    public void setRunningNrwVpfBalance(BigDecimal runningNrwVpfBalance) {
+        this.runningNrwVpfBalance = runningNrwVpfBalance;
     }
 
     public PayrollRun getPayrollRun() {

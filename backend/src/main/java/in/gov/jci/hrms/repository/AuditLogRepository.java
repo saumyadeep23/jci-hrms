@@ -30,4 +30,7 @@ public interface AuditLogRepository extends JpaRepository<AuditLog, Long> {
     Page<AuditLog> search(@Param("entityName") String entityName, @Param("entityId") Long entityId,
                            @Param("performedBy") String performedBy, @Param("fromDate") Instant fromDate,
                            @Param("toDate") Instant toDate, Pageable pageable);
+
+    /** CpfTransactionDisputeService.history() (Part 12/41) - the full chronological status-change timeline for one dispute, reusing this app's existing generic audit trail (CpfTransactionDispute is Auditable) rather than a bespoke dispute-history table. */
+    java.util.List<AuditLog> findByEntityNameAndEntityIdOrderByCreatedAtAsc(String entityName, Long entityId);
 }

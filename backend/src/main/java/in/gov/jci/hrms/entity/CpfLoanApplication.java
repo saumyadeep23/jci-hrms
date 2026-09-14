@@ -68,6 +68,20 @@ public class CpfLoanApplication implements Auditable {
     @Column(name = "sanction_date")
     private LocalDate sanctionDate;
 
+    /**
+     * Head-wise split of a NON_REFUNDABLE_WITHDRAWAL's sanctionedAmount across the three funds it is drawn
+     * from - must sum to sanctionedAmount, enforced in sanctionLoan(). Always 0 for a REFUNDABLE_LOAN,
+     * which debits EE only (spilling into VPF if EE is insufficient) rather than an officer-chosen split.
+     */
+    @Column(name = "sanc_nrw_ee", nullable = false, precision = 12, scale = 2)
+    private BigDecimal sancNrwEe = BigDecimal.ZERO;
+
+    @Column(name = "sanc_nrw_er", nullable = false, precision = 12, scale = 2)
+    private BigDecimal sancNrwEr = BigDecimal.ZERO;
+
+    @Column(name = "sanc_nrw_vpf", nullable = false, precision = 12, scale = 2)
+    private BigDecimal sancNrwVpf = BigDecimal.ZERO;
+
     @Column(name = "monthly_recovery_principal", nullable = false, precision = 12, scale = 2)
     private BigDecimal monthlyRecoveryPrincipal = BigDecimal.ZERO;
 
@@ -124,6 +138,19 @@ public class CpfLoanApplication implements Auditable {
 
     @Column(name = "preclosed_at")
     private Instant preclosedAt;
+
+    /**
+     * cpf_application.id (V84) - set only when this loan was created by
+     * {@code CpfApplicationService.disburse()} bridging a refundable rule-engine withdrawal into this
+     * table's own repayment/recovery/settlement machinery (Part 4/7). Null for a loan applied directly
+     * through {@link in.gov.jci.hrms.service.CpfLoanApplicationService}'s own legacy apply/sanction
+     * flow. A plain scalar UUID (not a JPA @ManyToOne to CpfApplication) - same lighter-weight
+     * cross-aggregate reference style {@code CpfApplication.employeeCode} itself already uses, rather
+     * than forcing a bidirectional object-graph coupling between the two independently-lifecycled
+     * aggregates.
+     */
+    @Column(name = "cpf_application_id")
+    private java.util.UUID cpfApplicationId;
 
     @CreationTimestamp
     @Column(name = "created_at")
@@ -190,6 +217,30 @@ public class CpfLoanApplication implements Auditable {
 
     public void setSanctionDate(LocalDate sanctionDate) {
         this.sanctionDate = sanctionDate;
+    }
+
+    public BigDecimal getSancNrwEe() {
+        return sancNrwEe;
+    }
+
+    public void setSancNrwEe(BigDecimal sancNrwEe) {
+        this.sancNrwEe = sancNrwEe;
+    }
+
+    public BigDecimal getSancNrwEr() {
+        return sancNrwEr;
+    }
+
+    public void setSancNrwEr(BigDecimal sancNrwEr) {
+        this.sancNrwEr = sancNrwEr;
+    }
+
+    public BigDecimal getSancNrwVpf() {
+        return sancNrwVpf;
+    }
+
+    public void setSancNrwVpf(BigDecimal sancNrwVpf) {
+        this.sancNrwVpf = sancNrwVpf;
     }
 
     public BigDecimal getMonthlyRecoveryPrincipal() {
@@ -344,6 +395,14 @@ public class CpfLoanApplication implements Auditable {
         this.preclosedAt = preclosedAt;
     }
 
+    public java.util.UUID getCpfApplicationId() {
+        return cpfApplicationId;
+    }
+
+    public void setCpfApplicationId(java.util.UUID cpfApplicationId) {
+        this.cpfApplicationId = cpfApplicationId;
+    }
+
     @Override
     public String auditEntityName() {
         return "CpfLoanApplication";
@@ -366,6 +425,7 @@ public class CpfLoanApplication implements Auditable {
         snapshot.put("recoveryPhase", recoveryPhase);
         snapshot.put("isPreclosed", preclosed);
         snapshot.put("status", status);
+        snapshot.put("cpfApplicationId", cpfApplicationId);
         return snapshot;
     }
 }

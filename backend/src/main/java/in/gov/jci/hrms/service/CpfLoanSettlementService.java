@@ -101,9 +101,10 @@ public class CpfLoanSettlementService {
 
     /**
      * Walks this loan's own ledger rows to find the outstanding principal as of a given date - starts at
-     * the LOAN_WITHDRAWAL's totalDebit and is reduced by each PRINCIPAL-phase LOAN_REPAYMENT's totalCredit
-     * (identified by eeShareCredit+vpfCredit > 0 - see CpfLedgerSyncService.postLoanInterestRecoveryEntry's
-     * own comment for why an INTEREST-phase LOAN_REPAYMENT row must NOT be mistaken for one of these).
+     * the LOAN_WITHDRAWAL's totalDebit and is reduced by each PRINCIPAL-phase LOAN_REPAYMENT's
+     * loanRepayPrincipal. Discriminated via loanRepayPrincipal (not eeShareCredit+vpfCredit) since an
+     * INTEREST-phase LOAN_REPAYMENT row now also carries an EE credit (loanRepayInterest) - see
+     * CpfLedgerSyncService.postLoanInterestRecoveryEntry()'s own comment.
      */
     private BigDecimal outstandingPrincipalAsOf(List<CpfTrustMemberLedgerEntry> loanEntries, LocalDate asOf) {
         BigDecimal outstanding = BigDecimal.ZERO;
@@ -114,16 +115,35 @@ public class CpfLoanSettlementService {
             if (entry.getEntryType() == CpfLedgerEntryType.LOAN_WITHDRAWAL) {
                 outstanding = entry.getTotalDebit();
             } else if (entry.getEntryType() == CpfLedgerEntryType.LOAN_REPAYMENT
-                    && entry.getEeShareCredit().add(entry.getVpfCredit()).signum() > 0) {
-                outstanding = outstanding.subtract(entry.getTotalCredit()).max(BigDecimal.ZERO);
+                    && entry.getLoanRepayPrincipal().signum() > 0) {
+                outstanding = outstanding.subtract(entry.getLoanRepayPrincipal()).max(BigDecimal.ZERO);
             }
         }
         return outstanding;
     }
 
+    /**
+     * Part 21/23 - locks the loan row before reading/mutating its outstanding balance (serializing
+     * against a concurrent payroll recovery posting on the same loan - see
+     * CpfLedgerSyncService.applyTwoPhaseLoanRecovery()'s own matching lock), and is idempotent on
+     * (loanId, instrumentOrChallanNo): a retried request carrying the same instrument/challan number for
+     * the same loan returns the original settlement instead of posting a second one.
+     */
     @Transactional
     public CpfLoanSettlementResponse processCashSettlement(Long loanId, CpfLoanSettlementRequest request, Long receivedByOfficerId) {
-        CpfLoanApplication loan = findOrThrow(loanId);
+        // Lock the loan row FIRST (Part 21) - a second, truly-concurrent request for the same
+        // (loanId, instrumentOrChallanNo) blocks here until the first commits, so the idempotency check
+        // right after is guaranteed to see that first request's already-committed settlement row rather
+        // than racing it (the uq_cpf_loan_settlement_loan_instrument constraint, V84, is the final
+        // backstop if this lock is ever bypassed).
+        CpfLoanApplication loan = loanRepository.findByIdForUpdate(loanId)
+                .orElseThrow(() -> new MasterDataNotFoundException("CPF Loan Application", loanId));
+
+        var existing = settlementRepository.findByLoanIdAndInstrumentOrChallanNo(loanId, request.instrumentOrChallanNo());
+        if (existing.isPresent()) {
+            return CpfLoanSettlementResponse.from(existing.get());
+        }
+
         if (loan.getStatus() != CpfLoanApplicationStatus.DISBURSED) {
             throw new BusinessRuleViolationException(
                     "CPF Loan Application " + loanId + " must be DISBURSED to record a cash settlement but is " + loan.getStatus());
@@ -132,13 +152,25 @@ public class CpfLoanSettlementService {
         CpfLoanSettlementQuoteResponse quote = buildQuote(loan, LocalDate.now());
 
         BigDecimal priorOutstandingBalance = loan.getOutstandingBalance();
-        BigDecimal newOutstandingBalance = priorOutstandingBalance.subtract(request.principalPaid()).max(BigDecimal.ZERO);
+        // Part 22/55 invariant ("recovered principal <= outstanding principal"): cap what actually gets
+        // applied/credited at what was still genuinely outstanding under this now-locked, live read - a
+        // request.principalPaid() larger than that (an overpayment, or a stale figure computed before a
+        // concurrent payroll recovery already reduced this same balance) must never over-credit the
+        // member's own EE ledger balance. The transaction record itself (txn.setPrincipalPaid below)
+        // still stores what the member actually remitted, for reconciliation.
+        BigDecimal principalApplied = request.principalPaid().min(priorOutstandingBalance).max(BigDecimal.ZERO);
+        BigDecimal newOutstandingBalance = priorOutstandingBalance.subtract(principalApplied).max(BigDecimal.ZERO);
         boolean earlyForeclosure = priorOutstandingBalance.signum() > 0 && newOutstandingBalance.signum() == 0;
 
+        // Same overpayment guard as principal above: the member's actual interest PAYMENT is capped at
+        // what was genuinely still outstanding before any rebate is considered - a rebate is a waiver
+        // (Trust income foregone), not cash received, so it must never itself generate an EE credit.
+        BigDecimal priorOutstandingInterest = loan.getOutstandingInterest();
+        BigDecimal interestPaymentApplied = request.interestPaid().min(priorOutstandingInterest).max(BigDecimal.ZERO);
+        BigDecimal newOutstandingInterest = priorOutstandingInterest.subtract(interestPaymentApplied);
         BigDecimal interestRebateApplied = BigDecimal.ZERO;
-        BigDecimal newOutstandingInterest = loan.getOutstandingInterest().subtract(request.interestPaid());
         if (earlyForeclosure) {
-            interestRebateApplied = quote.interestRebateAmount();
+            interestRebateApplied = quote.interestRebateAmount().min(newOutstandingInterest).max(BigDecimal.ZERO);
             newOutstandingInterest = newOutstandingInterest.subtract(interestRebateApplied);
         }
         newOutstandingInterest = newOutstandingInterest.max(BigDecimal.ZERO);
@@ -154,8 +186,14 @@ public class CpfLoanSettlementService {
             loan.setRecoveryPhase(CpfLoanRecoveryPhase.INTEREST);
         }
 
-        if (request.principalPaid().signum() > 0) {
-            postPrincipalSettlementLedgerEntry(loan, request.principalPaid());
+        if (principalApplied.signum() > 0) {
+            postPrincipalSettlementLedgerEntry(loan, principalApplied);
+        }
+        // Business decision (confirmed): cash-settled interest is credited to the member's own EE share,
+        // exactly like payroll-recovered interest (CpfLedgerSyncService.postLoanInterestRecoveryEntry) -
+        // the rebate itself is never credited, only the interest actually paid in cash.
+        if (interestPaymentApplied.signum() > 0) {
+            postInterestSettlementLedgerEntry(loan, interestPaymentApplied);
         }
 
         LocalDate today = LocalDate.now();
@@ -185,11 +223,19 @@ public class CpfLoanSettlementService {
         BigDecimal priorEe = BigDecimal.ZERO;
         BigDecimal priorEr = BigDecimal.ZERO;
         BigDecimal priorVpf = BigDecimal.ZERO;
+        BigDecimal priorLoanCpfBalance = BigDecimal.ZERO;
+        BigDecimal priorNrwEeBalance = BigDecimal.ZERO;
+        BigDecimal priorNrwErBalance = BigDecimal.ZERO;
+        BigDecimal priorNrwVpfBalance = BigDecimal.ZERO;
         var priorEntry = ledgerRepository.findFirstByEmployee_IdOrderByValueDateDescIdDesc(employee.getId());
         if (priorEntry.isPresent()) {
             priorEe = priorEntry.get().getRunningEeBalance();
             priorEr = priorEntry.get().getRunningErBalance();
             priorVpf = priorEntry.get().getRunningVpfBalance();
+            priorLoanCpfBalance = priorEntry.get().getRunningLoanCpfBalance();
+            priorNrwEeBalance = priorEntry.get().getRunningNrwEeBalance();
+            priorNrwErBalance = priorEntry.get().getRunningNrwErBalance();
+            priorNrwVpfBalance = priorEntry.get().getRunningNrwVpfBalance();
         }
 
         LocalDate valueDate = LocalDate.now();
@@ -199,8 +245,59 @@ public class CpfLoanSettlementService {
                 newEe, priorEr, priorVpf, newEe.add(priorEr).add(priorVpf));
         entry.setEeShareCredit(principalPaid);
         entry.setTotalCredit(principalPaid);
+        entry.setLoanRepayPrincipal(principalPaid);
+        entry.setRunningLoanCpfBalance(priorLoanCpfBalance.subtract(principalPaid));
+        entry.setRunningNrwEeBalance(priorNrwEeBalance);
+        entry.setRunningNrwErBalance(priorNrwErBalance);
+        entry.setRunningNrwVpfBalance(priorNrwVpfBalance);
         entry.setLoan(loan);
         entry.setRemarks("Direct cash settlement principal repayment against " + loan.getLoanApplicationNo());
+        ledgerRepository.save(entry);
+    }
+
+    /**
+     * Credits the member's own EE share by the interest actually paid in cash - same accounting rule as
+     * CpfLedgerSyncService.postLoanInterestRecoveryEntry()'s own payroll-recovery interest phase (interest
+     * recovered on a CPF loan remains Trust income for statutory-filing purposes, but is folded back into
+     * the member's own EE corpus), so a member paying off interest by cash settlement is treated
+     * identically to one whose interest was recovered through payroll. runningLoanCpfBalance carries
+     * forward unchanged - interest was never part of the tracked principal balance.
+     */
+    private void postInterestSettlementLedgerEntry(CpfLoanApplication loan, BigDecimal interestPaid) {
+        Employee employee = loan.getEmployee();
+        BigDecimal priorEe = BigDecimal.ZERO;
+        BigDecimal priorEr = BigDecimal.ZERO;
+        BigDecimal priorVpf = BigDecimal.ZERO;
+        BigDecimal priorLoanCpfBalance = BigDecimal.ZERO;
+        BigDecimal priorNrwEeBalance = BigDecimal.ZERO;
+        BigDecimal priorNrwErBalance = BigDecimal.ZERO;
+        BigDecimal priorNrwVpfBalance = BigDecimal.ZERO;
+        var priorEntry = ledgerRepository.findFirstByEmployee_IdOrderByValueDateDescIdDesc(employee.getId());
+        if (priorEntry.isPresent()) {
+            priorEe = priorEntry.get().getRunningEeBalance();
+            priorEr = priorEntry.get().getRunningErBalance();
+            priorVpf = priorEntry.get().getRunningVpfBalance();
+            priorLoanCpfBalance = priorEntry.get().getRunningLoanCpfBalance();
+            priorNrwEeBalance = priorEntry.get().getRunningNrwEeBalance();
+            priorNrwErBalance = priorEntry.get().getRunningNrwErBalance();
+            priorNrwVpfBalance = priorEntry.get().getRunningNrwVpfBalance();
+        }
+
+        LocalDate valueDate = LocalDate.now();
+        String finYear = IncomingFundTransferService.financialYearFor(valueDate);
+        BigDecimal newEe = priorEe.add(interestPaid);
+        CpfTrustMemberLedgerEntry entry = new CpfTrustMemberLedgerEntry(employee, finYear, valueDate, CpfLedgerEntryType.LOAN_REPAYMENT,
+                newEe, priorEr, priorVpf, newEe.add(priorEr).add(priorVpf));
+        entry.setEeShareCredit(interestPaid);
+        entry.setInterestCredit(interestPaid);
+        entry.setLoanRepayInterest(interestPaid);
+        entry.setTotalCredit(interestPaid);
+        entry.setRunningLoanCpfBalance(priorLoanCpfBalance);
+        entry.setRunningNrwEeBalance(priorNrwEeBalance);
+        entry.setRunningNrwErBalance(priorNrwErBalance);
+        entry.setRunningNrwVpfBalance(priorNrwVpfBalance);
+        entry.setLoan(loan);
+        entry.setRemarks("Direct cash settlement interest repayment against " + loan.getLoanApplicationNo());
         ledgerRepository.save(entry);
     }
 

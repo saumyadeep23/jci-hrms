@@ -114,7 +114,7 @@ class CpfLoanTwoPhaseAndSettlementTest {
         CpfLoanApplicationResponse first = cpfLoanApplicationService.applyLoan(new CpfLoanApplicationRequest(employee.getId(),
                 CpfLoanType.REFUNDABLE_LOAN, "HOUSING", new BigDecimal("5000.00"), 10, "First advance"), null);
         cpfLoanApplicationService.sanctionLoan(first.id(),
-                new CpfLoanSanctionRequest(new BigDecimal("5000.00"), "SANC/2P/BLOCK", SANCTION_DATE, 10, 10), null);
+                new CpfLoanSanctionRequest(new BigDecimal("5000.00"), "SANC/2P/BLOCK", SANCTION_DATE, 10, 10, null, null, null), null);
 
         assertThatThrownBy(() -> cpfLoanApplicationService.applyLoan(new CpfLoanApplicationRequest(employee.getId(),
                 CpfLoanType.REFUNDABLE_LOAN, "MEDICAL", new BigDecimal("1000.00"), 5, "Second advance"), null))
@@ -131,7 +131,7 @@ class CpfLoanTwoPhaseAndSettlementTest {
         CpfLoanApplicationResponse applied = cpfLoanApplicationService.applyLoan(new CpfLoanApplicationRequest(
                 employee.getId(), CpfLoanType.REFUNDABLE_LOAN, "HOUSING", new BigDecimal("12000.00"), 12, "Home repair"), null);
         CpfLoanApplicationResponse sanctioned = cpfLoanApplicationService.sanctionLoan(applied.id(),
-                new CpfLoanSanctionRequest(new BigDecimal("12000.00"), "SANC/2P/001", SANCTION_DATE, 12, 12), null);
+                new CpfLoanSanctionRequest(new BigDecimal("12000.00"), "SANC/2P/001", SANCTION_DATE, 12, 12, null, null, null), null);
 
         assertThat(sanctioned.baseCpfRate()).isEqualByComparingTo("8.25");
         assertThat(sanctioned.interestRate()).isEqualByComparingTo("9.25");
@@ -153,7 +153,7 @@ class CpfLoanTwoPhaseAndSettlementTest {
         CpfLoanApplicationResponse applied = cpfLoanApplicationService.applyLoan(new CpfLoanApplicationRequest(
                 employee.getId(), CpfLoanType.REFUNDABLE_LOAN, "HOUSING", new BigDecimal("1000.00"), 1, "test"), null);
         cpfLoanApplicationService.sanctionLoan(applied.id(),
-                new CpfLoanSanctionRequest(new BigDecimal("1000.00"), "SANC/2P/002", SANCTION_DATE, 1, 1), null);
+                new CpfLoanSanctionRequest(new BigDecimal("1000.00"), "SANC/2P/002", SANCTION_DATE, 1, 1, null, null, null), null);
         cpfLoanApplicationService.disburseLoan(applied.id(), null);
 
         List<CpfTrustMemberLedgerEntry> entries = ledgerRepository.findByEmployee_IdOrderByValueDateAscIdAsc(employee.getId());
@@ -176,7 +176,7 @@ class CpfLoanTwoPhaseAndSettlementTest {
         CpfLoanApplicationResponse applied = cpfLoanApplicationService.applyLoan(new CpfLoanApplicationRequest(
                 employee.getId(), CpfLoanType.REFUNDABLE_LOAN, "HOUSING", new BigDecimal("1000.00"), 1, "test"), null);
         CpfLoanApplicationResponse sanctioned = cpfLoanApplicationService.sanctionLoan(applied.id(),
-                new CpfLoanSanctionRequest(new BigDecimal("1000.00"), "SANC/2P/003", SANCTION_DATE, 1, 1), null);
+                new CpfLoanSanctionRequest(new BigDecimal("1000.00"), "SANC/2P/003", SANCTION_DATE, 1, 1, null, null, null), null);
         // (1+1) * 1000 * 9.25 / 2400 = 7.71
         assertThat(sanctioned.totalInterestAmount()).isEqualByComparingTo("7.71");
         cpfLoanApplicationService.disburseLoan(applied.id(), null);
@@ -205,9 +205,12 @@ class CpfLoanTwoPhaseAndSettlementTest {
         List<CpfTrustMemberLedgerEntry> afterPrincipalEntries = ledgerRepository.findByEmployee_IdOrderByValueDateAscIdAsc(employee.getId());
         CpfTrustMemberLedgerEntry principalRecoveryEntry = afterPrincipalEntries.get(afterPrincipalEntries.size() - 1);
         assertThat(principalRecoveryEntry.getEeShareCredit()).isEqualByComparingTo("1000.00");
+        assertThat(principalRecoveryEntry.getLoanRepayPrincipal()).isEqualByComparingTo("1000.00");
         BigDecimal runningTotalAfterPrincipal = principalRecoveryEntry.getRunningTotalBalance();
         // Principal recovery restores the member's own EE balance (20000 disbursed down to 19000, now back to 20000).
         assertThat(principalRecoveryEntry.getRunningEeBalance()).isEqualByComparingTo("20000.00");
+        // The 1000.00 disbursed then fully repaid nets the tracked Refundable Loan balance back to 0.
+        assertThat(principalRecoveryEntry.getRunningLoanCpfBalance()).isEqualByComparingTo("0.00");
 
         // Batch 2 (later month): Head 31 (CPFLOAN_INT) fully clears the 7.71 outstanding interest.
         PayrollBatch batch2 = payrollBatchRepository.save(new PayrollBatch("BATCH-CPFL2P-2", batch2Month.getMonthValue(), batch2Month.getYear(), batchFinYear));
@@ -227,11 +230,14 @@ class CpfLoanTwoPhaseAndSettlementTest {
         CpfTrustMemberLedgerEntry interestRecoveryEntry = afterInterestEntries.get(afterInterestEntries.size() - 1);
         assertThat(interestRecoveryEntry.getEntryType()).isEqualTo(CpfLedgerEntryType.LOAN_REPAYMENT);
         assertThat(interestRecoveryEntry.getInterestCredit()).isEqualByComparingTo("7.71");
-        // Interest recovery is Trust income, not a credit to the member's own corpus - EE/running total must
-        // carry forward unchanged from the principal-phase entry, not increase further.
-        assertThat(interestRecoveryEntry.getEeShareCredit()).isEqualByComparingTo("0.00");
-        assertThat(interestRecoveryEntry.getRunningEeBalance()).isEqualByComparingTo("20000.00");
-        assertThat(interestRecoveryEntry.getRunningTotalBalance()).isEqualByComparingTo(runningTotalAfterPrincipal);
+        assertThat(interestRecoveryEntry.getLoanRepayInterest()).isEqualByComparingTo("7.71");
+        // Per the Member CPF Passbook's accounting rule, loan interest recovered is credited back into the
+        // member's own EE share (20000 + 7.71), unlike principal-phase's own restoration of the same balance.
+        assertThat(interestRecoveryEntry.getEeShareCredit()).isEqualByComparingTo("7.71");
+        assertThat(interestRecoveryEntry.getRunningEeBalance()).isEqualByComparingTo("20007.71");
+        assertThat(interestRecoveryEntry.getRunningTotalBalance()).isEqualByComparingTo(runningTotalAfterPrincipal.add(new BigDecimal("7.71")));
+        // Interest was never part of the tracked Refundable Loan principal balance.
+        assertThat(interestRecoveryEntry.getRunningLoanCpfBalance()).isEqualByComparingTo("0.00");
     }
 
     // --- 5. Cash settlement early foreclosure rebate calculation ---
@@ -244,7 +250,7 @@ class CpfLoanTwoPhaseAndSettlementTest {
         CpfLoanApplicationResponse applied = cpfLoanApplicationService.applyLoan(new CpfLoanApplicationRequest(
                 employee.getId(), CpfLoanType.REFUNDABLE_LOAN, "HOUSING", new BigDecimal("12000.00"), 12, "Home repair"), null);
         CpfLoanApplicationResponse sanctioned = cpfLoanApplicationService.sanctionLoan(applied.id(),
-                new CpfLoanSanctionRequest(new BigDecimal("12000.00"), "SANC/2P/004", SANCTION_DATE, 12, 12), null);
+                new CpfLoanSanctionRequest(new BigDecimal("12000.00"), "SANC/2P/004", SANCTION_DATE, 12, 12, null, null, null), null);
         // Original projected interest assuming the full 12-installment tenure: 601.25.
         assertThat(sanctioned.totalInterestAmount()).isEqualByComparingTo("601.25");
         cpfLoanApplicationService.disburseLoan(applied.id(), null);

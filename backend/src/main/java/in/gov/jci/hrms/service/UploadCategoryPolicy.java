@@ -10,6 +10,8 @@ import static in.gov.jci.hrms.entity.UploadCategory.APAR;
 import static in.gov.jci.hrms.entity.UploadCategory.APPOINTMENT_ORDER;
 import static in.gov.jci.hrms.entity.UploadCategory.BANK_PROOF;
 import static in.gov.jci.hrms.entity.UploadCategory.CASTE_CERT;
+import static in.gov.jci.hrms.entity.UploadCategory.CPF_DISPUTE_ATTACHMENT;
+import static in.gov.jci.hrms.entity.UploadCategory.CPF_WITHDRAWAL_SUPPORTING_DOC;
 import static in.gov.jci.hrms.entity.UploadCategory.DISCIPLINARY;
 import static in.gov.jci.hrms.entity.UploadCategory.JOINING_REPORT;
 import static in.gov.jci.hrms.entity.UploadCategory.OTHER;
@@ -51,6 +53,8 @@ public final class UploadCategoryPolicy {
             Map.entry(SERVICE_BOOK_SCAN, new Rule(PDF_MIME_TYPES, PDF_EXTENSIONS, 10 * ONE_MB)),
             Map.entry(APAR, new Rule(PDF_MIME_TYPES, PDF_EXTENSIONS, 10 * ONE_MB)),
             Map.entry(DISCIPLINARY, new Rule(PDF_MIME_TYPES, PDF_EXTENSIONS, 10 * ONE_MB)),
+            Map.entry(CPF_DISPUTE_ATTACHMENT, new Rule(DOC_OR_IMAGE_MIME_TYPES, DOC_OR_IMAGE_EXTENSIONS, 5 * ONE_MB)),
+            Map.entry(CPF_WITHDRAWAL_SUPPORTING_DOC, new Rule(DOC_OR_IMAGE_MIME_TYPES, DOC_OR_IMAGE_EXTENSIONS, 5 * ONE_MB)),
             Map.entry(OTHER, new Rule(PDF_MIME_TYPES, PDF_EXTENSIONS, 10 * ONE_MB))
     );
 

@@ -79,10 +79,16 @@ class CpfInterimSettlementTest {
         assertThat(posted.getRateApplied()).isEqualByComparingTo("8.25");
         assertThat(posted.getRateSourceFinYear()).isEqualTo("2040-2041");
         assertThat(posted.getFinYear()).isEqualTo("2041-2042");
-        // Apr-Sep 2041 (6 elapsed months) at a flat 12000/6000 balance: (72000*8.25/1200)=495.00, (36000*8.25/1200)=247.50.
+        // Apr-Sep 2041 (6 elapsed months) at a flat 12000/6000 balance: (72000*8.25/1200)=495.00,
+        // (36000*8.25/1200)=247.50. Per-component amounts are never individually rounded to whole rupees
+        // (see CpfInterestCalculator's own javadoc) - only the aggregate total_credit/interest_credit is;
+        // eeShareCredit/erShareCredit/runningTotalBalance keep full (2-decimal) precision.
         assertThat(posted.getEeShareCredit()).isEqualByComparingTo("495.00");
         assertThat(posted.getErShareCredit()).isEqualByComparingTo("247.50");
         assertThat(posted.getRunningTotalBalance()).isEqualByComparingTo("18742.50");
+        // The aggregate (495.00 + 247.50 = 742.50) IS rounded, HALF_UP, to the nearest whole rupee: 743.
+        assertThat(posted.getInterestCredit()).isEqualByComparingTo("743");
+        assertThat(posted.getTotalCredit()).isEqualByComparingTo("743");
     }
 
     @Test

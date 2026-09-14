@@ -26,5 +26,9 @@ public enum UploadCategory {
     SERVICE_BOOK_SCAN,
     APAR,
     DISCIPLINARY,
+    /** CPF Transaction Dispute evidence (Passbook V2) - the resulting fileS3Key is threaded onto CpfTransactionDispute.attachmentS3Key by CpfTransactionDisputeService, the same "caller links it back" pattern as BANK_PROOF/QUALIFICATION. */
+    CPF_DISPUTE_ATTACHMENT,
+    /** CPF Trust withdrawal/loan application supporting document (Part 29) - the resulting fileS3Key/originalFileName is referenced by code (CpfApplicationDocumentSubmission) in the apply() request body, not written back onto any entity by this upload call itself. */
+    CPF_WITHDRAWAL_SUPPORTING_DOC,
     OTHER
 }

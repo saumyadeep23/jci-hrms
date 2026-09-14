@@ -87,6 +87,7 @@ class PayrollBatchComputationServiceTest {
     private static final int HEAD_TDS = 40;
     private static final int HEAD_CEA = 22;
     private static final int STAT_HEAD_EMPLOYER_EPF = 1;
+    private static final int STAT_HEAD_EMPLOYER_JCPF = 3;
     private static final int STAT_HEAD_EMPLOYER_PENSION = 4;
     private static final int STAT_HEAD_EMPLOYER_NPS = 15;
 
@@ -114,6 +115,9 @@ class PayrollBatchComputationServiceTest {
     @Mock private in.gov.jci.hrms.repository.EmployeeSuspensionRecordRepository suspensionRecordRepository;
     @Mock private in.gov.jci.hrms.repository.EmployeeSuspensionNecRepository suspensionNecRepository;
     @Mock private in.gov.jci.hrms.repository.EmployeeDeputationRecordRepository deputationRecordRepository;
+    @Mock private PayrollQueryService payrollQueryService;
+    @Mock private CpfLoanPayrollRecoveryResolverService cpfLoanPayrollRecoveryResolverService;
+    @Mock private JciEccsPayrollRecoveryResolverService jciEccsPayrollRecoveryResolverService;
 
     private PayrollBatchComputationService service;
 
@@ -131,11 +135,14 @@ class PayrollBatchComputationServiceTest {
                 dailyAttendanceRepository, payrollHraRateRepository, transportAllowanceRateRepository, ptaxSlabRepository,
                 stateMasterRepository, payrollStatutoryParameterRepository, npsDeclarationRepository, vehicleAllotmentRepository,
                 quarterAllotmentService, encashmentRepository, payrollMovementInputRepository, payrollTdsEngine, payrollTaxOverrideRepository, ceaClaimRepository,
-                suspensionRecordRepository, suspensionNecRepository, deputationRecordRepository);
+                suspensionRecordRepository, suspensionNecRepository, deputationRecordRepository, payrollQueryService,
+                cpfLoanPayrollRecoveryResolverService, jciEccsPayrollRecoveryResolverService);
 
         batch = new PayrollBatch("BATCH-2026-08", 8, 2026, "2026-2027");
         ReflectionTestUtils.setField(batch, "id", 100L);
         batch.setStatus(PayrollBatchStatus.DRAFT);
+        when(cpfLoanPayrollRecoveryResolverService.resolve(any(), any())).thenReturn(CpfLoanPayrollRecoveryResolverService.RecoveryAmounts.ZERO);
+        when(jciEccsPayrollRecoveryResolverService.resolve(any(), any())).thenReturn(JciEccsPayrollRecoveryResolverService.RecoveryAmounts.ZERO);
 
         periodStart = LocalDate.of(2026, 8, 1);
         periodEnd = LocalDate.of(2026, 8, 31);
@@ -291,25 +298,30 @@ class PayrollBatchComputationServiceTest {
     // ---- Employer-side statutory contributions (payroll_monthly_statutory_items, never the payslip) ----
 
     @Test
-    void processBatch_notEpsOrNpsEligible_postsNoEmployerStatutoryContributions() {
-        // employee.isEpsEligible()/isNpsEligible() are both false by default in setUp().
+    void processBatch_notEpsOrNpsEligible_postsFullCpfToJcpfWithNoPensionOrNps() {
+        // employee.isEpsEligible()/isNpsEligible() are both false by default in setUp(). CPF (stat
+        // head 1) is unaffected by either flag - it mirrors computeCpf()'s own unconditional
+        // application (58500 * 12% = 7020). With no EPS pension carve-out, JCPF (stat head 3) absorbs
+        // the entire CPF amount (7020 - 0) rather than being dropped - see resolveEmployerContributions().
         service.processBatch(100L);
 
-        assertThat(amountForStatHead(STAT_HEAD_EMPLOYER_EPF)).isEmpty();
+        assertThat(amountForStatHead(STAT_HEAD_EMPLOYER_EPF)).contains(new BigDecimal("7020"));
         assertThat(amountForStatHead(STAT_HEAD_EMPLOYER_PENSION)).isEmpty();
         assertThat(amountForStatHead(STAT_HEAD_EMPLOYER_NPS)).isEmpty();
+        assertThat(amountForStatHead(STAT_HEAD_EMPLOYER_JCPF)).contains(new BigDecimal("7020"));
     }
 
     @Test
-    void processBatch_epsEligible_splitsEmployerContributionIntoPensionCarveOutAndEpfRemainder() {
+    void processBatch_epsEligible_splitsCpfIntoPensionCarveOutAndJcpfRemainder() {
         employee.setEpsEligible(true);
 
         service.processBatch(100L);
 
-        // Basic+DA = 58500; employer total (12%) = 7020; pension carve-out round(8.33% of min(58500,15000))
-        // = round(1249.5) = 1250 (HALF_UP); EPF remainder = 7020 - 1250 = 5770
+        // Basic+DA = 58500; CPF (stat head 1, unconditional) = 7020; pension carve-out
+        // round(8.33% of min(58500,15000)) = round(1249.5) = 1250 (HALF_UP); JCPF remainder = 7020 - 1250 = 5770
         assertThat(amountForStatHead(STAT_HEAD_EMPLOYER_PENSION)).contains(new BigDecimal("1250"));
-        assertThat(amountForStatHead(STAT_HEAD_EMPLOYER_EPF)).contains(new BigDecimal("5770"));
+        assertThat(amountForStatHead(STAT_HEAD_EMPLOYER_EPF)).contains(new BigDecimal("7020"));
+        assertThat(amountForStatHead(STAT_HEAD_EMPLOYER_JCPF)).contains(new BigDecimal("5770"));
     }
 
     @Test
@@ -322,9 +334,10 @@ class PayrollBatchComputationServiceTest {
         // Base pension carve-out round(1249.5)=1250 (HALF_UP) + FLOOR(1.16% of the excess above the
         // 15000 ceiling, 58500-15000=43500): floor(43500*1.16%)=floor(504.60)=504 -> 1250+504=1754.
         // The higher-pension extra floors rather than rounding HALF_UP - see resolveEmployerContributions()'s
-        // own javadoc. EPF remainder is unaffected by the extra rate.
+        // own javadoc. CPF (stat head 1) is unaffected by the extra rate; JCPF absorbs the reduced remainder.
         assertThat(amountForStatHead(STAT_HEAD_EMPLOYER_PENSION)).contains(new BigDecimal("1754"));
-        assertThat(amountForStatHead(STAT_HEAD_EMPLOYER_EPF)).contains(new BigDecimal("5770"));
+        assertThat(amountForStatHead(STAT_HEAD_EMPLOYER_EPF)).contains(new BigDecimal("7020"));
+        assertThat(amountForStatHead(STAT_HEAD_EMPLOYER_JCPF)).contains(new BigDecimal("5266"));
     }
 
     @Test
@@ -332,13 +345,14 @@ class PayrollBatchComputationServiceTest {
         // isEpsHigherPensionEligible() alone, without isEpsEligible(), computes nothing - matches
         // EmployeeService.create()'s own invariant that higher-pension can only be true alongside EPS
         // eligibility, but resolveEmployerContributions() re-checks isEpsEligible() independently rather
-        // than assuming that invariant always held for pre-existing data.
+        // than assuming that invariant always held for pre-existing data. CPF/JCPF stay unconditional.
         employee.setEpsHigherPensionEligible(true);
 
         service.processBatch(100L);
 
         assertThat(amountForStatHead(STAT_HEAD_EMPLOYER_PENSION)).isEmpty();
-        assertThat(amountForStatHead(STAT_HEAD_EMPLOYER_EPF)).isEmpty();
+        assertThat(amountForStatHead(STAT_HEAD_EMPLOYER_EPF)).contains(new BigDecimal("7020"));
+        assertThat(amountForStatHead(STAT_HEAD_EMPLOYER_JCPF)).contains(new BigDecimal("7020"));
     }
 
     @Test
@@ -508,6 +522,7 @@ class PayrollBatchComputationServiceTest {
         when(payrollMonthlyRecordRepository.findByBatch_Id(100L)).thenReturn(List.of(new PayrollMonthlyRecord(
                 batch, employee, "EMP-001", 8, 2026, null, null, "Z", "IDA", 31)));
         when(encashmentRepository.findByPayrollBatch_Id(100L)).thenReturn(List.of(tagged));
+        batch.setStatus(PayrollBatchStatus.CALCULATED);
 
         service.finalizeBatch(100L, null);
 
@@ -517,6 +532,7 @@ class PayrollBatchComputationServiceTest {
 
     @Test
     void finalizeBatch_withNoComputedRecords_throws() {
+        batch.setStatus(PayrollBatchStatus.CALCULATED);
         when(payrollMonthlyRecordRepository.findByBatch_Id(100L)).thenReturn(List.of());
 
         assertThatThrownBy(() -> service.finalizeBatch(100L, null))
@@ -599,6 +615,22 @@ class PayrollBatchComputationServiceTest {
 
         assertThatThrownBy(() -> service.processBatch(100L))
                 .isInstanceOf(BusinessRuleViolationException.class);
+    }
+
+    @Test
+    void processBatch_setsStatusToCalculated() {
+        PayrollBatch result = service.processBatch(100L);
+
+        assertThat(result.getStatus()).isEqualTo(PayrollBatchStatus.CALCULATED);
+    }
+
+    @Test
+    void processBatch_whenAlreadyCalculated_allowsRecompute() {
+        batch.setStatus(PayrollBatchStatus.CALCULATED);
+
+        PayrollBatch result = service.processBatch(100L);
+
+        assertThat(result.getStatus()).isEqualTo(PayrollBatchStatus.CALCULATED);
     }
 
     // ---- listRecords ----

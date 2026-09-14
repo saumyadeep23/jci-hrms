@@ -52,11 +52,18 @@ const PREVIEW_LOAN_MARKUP = 1.0
 function SanctionModal({ loan, onClose }: { loan: CpfLoanApplicationResponse; onClose: () => void }) {
   const { show } = useToast()
   const queryClient = useQueryClient()
+  const isNrw = loan.loanType === 'NON_REFUNDABLE_WITHDRAWAL'
   const [sanctionedAmount, setSanctionedAmount] = useState(String(loan.appliedAmount))
   const [sanctionOrderNo, setSanctionOrderNo] = useState('')
   const [sanctionDate, setSanctionDate] = useState('')
   const [totalInstallments, setTotalInstallments] = useState(loan.totalInstallments)
   const [interestInstallments, setInterestInstallments] = useState(loan.totalInstallments)
+  const [sancNrwEe, setSancNrwEe] = useState('')
+  const [sancNrwEr, setSancNrwEr] = useState('')
+  const [sancNrwVpf, setSancNrwVpf] = useState('')
+
+  const nrwSplitTotal = (Number(sancNrwEe) || 0) + (Number(sancNrwEr) || 0) + (Number(sancNrwVpf) || 0)
+  const nrwSplitMismatch = isNrw && Math.abs(nrwSplitTotal - (Number(sanctionedAmount) || 0)) > 0.005
 
   const previewRate = PREVIEW_BASE_RATE + PREVIEW_LOAN_MARKUP
   const interestPreview = useMemo(() => {
@@ -76,6 +83,9 @@ function SanctionModal({ loan, onClose }: { loan: CpfLoanApplicationResponse; on
         sanctionDate,
         totalInstallments,
         interestInstallments,
+        ...(isNrw
+          ? { sancNrwEe: Number(sancNrwEe) || 0, sancNrwEr: Number(sancNrwEr) || 0, sancNrwVpf: Number(sancNrwVpf) || 0 }
+          : {}),
       }
       return (await apiClient.put(`/v1/payroll/trust/loans/${loan.id}/sanction`, payload)).data
     },
@@ -110,6 +120,59 @@ function SanctionModal({ loan, onClose }: { loan: CpfLoanApplicationResponse; on
             className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
           />
         </div>
+
+        {isNrw && (
+          <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+            <p className="mb-2 text-xs font-medium text-slate-600">
+              Head-wise split (must total the sanctioned amount) - the withdrawal debits exactly these amounts from
+              each fund, not an EE-then-VPF waterfall.
+            </p>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-600">NRW EMP</label>
+                <input
+                  required
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={sancNrwEe}
+                  onChange={(e) => setSancNrwEe(e.target.value)}
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-600">NRW JCI</label>
+                <input
+                  required
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={sancNrwEr}
+                  onChange={(e) => setSancNrwEr(e.target.value)}
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-600">NRW VPF</label>
+                <input
+                  required
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={sancNrwVpf}
+                  onChange={(e) => setSancNrwVpf(e.target.value)}
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                />
+              </div>
+            </div>
+            {nrwSplitMismatch && (
+              <p className="mt-2 text-xs text-red-600">
+                Split total {nrwSplitTotal.toFixed(2)} must equal the sanctioned amount {(Number(sanctionedAmount) || 0).toFixed(2)}.
+              </p>
+            )}
+          </div>
+        )}
+
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="mb-1 block text-xs font-medium text-slate-600">Sanction Order No.</label>
@@ -178,7 +241,11 @@ function SanctionModal({ loan, onClose }: { loan: CpfLoanApplicationResponse; on
           <SecondaryButton type="button" onClick={onClose} className="flex-1 justify-center">
             Cancel
           </SecondaryButton>
-          <PrimaryButton type="submit" disabled={mutation.isPending || !sanctionDate} className="flex-1 justify-center">
+          <PrimaryButton
+            type="submit"
+            disabled={mutation.isPending || !sanctionDate || nrwSplitMismatch}
+            className="flex-1 justify-center"
+          >
             <CheckCircle2 size={14} /> Confirm Sanction
           </PrimaryButton>
         </div>

@@ -6,7 +6,9 @@ import { LoginPage } from './pages/auth/LoginPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { AttendancePunchPage } from './pages/attendance/AttendancePunchPage'
 import { PayslipViewerPage } from './pages/ess/PayslipViewerPage'
+import { SalarySlipsPage } from './pages/ess/SalarySlipsPage'
 import { PfStatementPage } from './pages/ess/PfStatementPage'
+import { CpfLoanSimulatorPage } from './pages/ess/CpfLoanSimulatorPage'
 import { Form16Page } from './pages/ess/Form16Page'
 import { ProfilePage } from './pages/ess/ProfilePage'
 import { ServiceBookPage } from './pages/ess/ServiceBookPage'
@@ -49,8 +51,24 @@ import { NpsComplianceDashboardPage } from './pages/admin/payroll/NpsComplianceD
 import { IncomingTransfersPage } from './pages/payroll/trust/IncomingTransfersPage'
 import { CpfPassbookView } from './pages/payroll/trust/CpfPassbookView'
 import { CpfInterestRateEntryPage } from './pages/payroll/trust/CpfInterestRateEntryPage'
+import { CpfInterestManagementPage } from './pages/payroll/trust/CpfInterestManagementPage'
+import { CpfWithdrawalRulesPage } from './pages/payroll/trust/CpfWithdrawalRulesPage'
 import { CpfMembersListPage } from './pages/payroll/trust/CpfMembersListPage'
 import { CpfLoansPage } from './pages/payroll/trust/loans/CpfLoansPage'
+import { CpfDisputeAdminPage } from './pages/admin/cpf/CpfDisputeAdminPage'
+import { JciEccsDashboardPage } from './pages/coop/jcieccs/JciEccsDashboardPage'
+import { MemberDirectoryPage } from './pages/coop/jcieccs/MemberDirectoryPage'
+import { ThriftLedgerPage } from './pages/coop/jcieccs/ThriftLedgerPage'
+import { MemberStagingPage } from './pages/coop/jcieccs/MemberStagingPage'
+import { ActiveLoansPage } from './pages/coop/jcieccs/ActiveLoansPage'
+import { ApplyLoanPage } from './pages/coop/jcieccs/ApplyLoanPage'
+import { RestructureTopUpPage } from './pages/coop/jcieccs/RestructureTopUpPage'
+import { CashRepaymentPage } from './pages/coop/jcieccs/CashRepaymentPage'
+import { PayrollDemandsPage } from './pages/coop/jcieccs/PayrollDemandsPage'
+import { DeductionReconciliationPage } from './pages/coop/jcieccs/DeductionReconciliationPage'
+import { AuditTrailPage } from './pages/coop/jcieccs/AuditTrailPage'
+import { IntegrityCheckPage } from './pages/coop/jcieccs/IntegrityCheckPage'
+import { SeparationClearancePage } from './pages/coop/jcieccs/SeparationClearancePage'
 
 const HR_ROLES: Role[] = ['HR_ADMIN', 'SUPER_ADMIN']
 const FINANCE_ROLES: Role[] = ['FINANCE_ADMIN', 'SUPER_ADMIN']
@@ -60,6 +78,12 @@ const ALMS_REPORT_ROLES: Role[] = ['HR_ADMIN', 'FINANCE_ADMIN', 'SUPER_ADMIN']
 const CPF_TRUST_ROLES: Role[] = ['FINANCE_ADMIN', 'CPF_ADMIN', 'SUPER_ADMIN']
 /** Matches PayrollMasterController's own @PreAuthorize exactly (no SUPER_ADMIN bypass there, so none here either). */
 const PAYROLL_MASTER_ROLES: Role[] = ['HR_ADMIN', 'BILL_SUPERVISOR', 'FINANCE_ADMIN']
+/** Matches JciEccsLoanController/JciEccsMemberController/JciEccsPayrollBatchController's own @PreAuthorize exactly. */
+const JCIECCS_ROLES: Role[] = ['COOP_ADMIN', 'FINANCE_ADMIN', 'SUPER_ADMIN']
+/** Matches JciEccsMigrationController's own @PreAuthorize exactly (narrower - no FINANCE_ADMIN). */
+const JCIECCS_MIGRATION_ROLES: Role[] = ['COOP_ADMIN', 'SUPER_ADMIN']
+/** No backend controller exists yet for separation/no-dues clearance (see SeparationClearancePage) - widened to include HR_ADMIN since this is as much an HR process as a co-op one. */
+const JCIECCS_SETTLEMENT_ROLES: Role[] = ['HR_ADMIN', 'COOP_ADMIN', 'FINANCE_ADMIN', 'SUPER_ADMIN']
 
 function Protected({ children, roles }: { children: React.ReactNode; roles?: Role[] }) {
   return (
@@ -78,7 +102,9 @@ function App() {
       <Route path="/attendance" element={<Protected><AttendancePunchPage /></Protected>} />
 
       <Route path="/payslips" element={<Protected><PayslipViewerPage /></Protected>} />
+      <Route path="/ess/salary-slips" element={<Protected><SalarySlipsPage /></Protected>} />
       <Route path="/pf-statement" element={<Protected><PfStatementPage /></Protected>} />
+      <Route path="/ess/cpf/loan-simulator" element={<Protected><CpfLoanSimulatorPage /></Protected>} />
       <Route path="/form16" element={<Protected><Form16Page /></Protected>} />
       <Route path="/profile" element={<Protected><ProfilePage /></Protected>} />
       <Route path="/service-book" element={<Protected><ServiceBookPage /></Protected>} />
@@ -122,8 +148,28 @@ function App() {
       <Route path="/payroll/trust/members" element={<Protected roles={CPF_TRUST_ROLES}><CpfMembersListPage /></Protected>} />
       <Route path="/payroll/trust/passbook" element={<Protected roles={CPF_TRUST_ROLES}><CpfPassbookView /></Protected>} />
       <Route path="/payroll/trust/interest-rates" element={<Protected roles={CPF_TRUST_ROLES}><CpfInterestRateEntryPage /></Protected>} />
+      <Route path="/payroll/trust/interest-management" element={<Protected roles={CPF_TRUST_ROLES}><CpfInterestManagementPage /></Protected>} />
+      <Route path="/payroll/trust/withdrawal-rules" element={<Protected roles={CPF_TRUST_ROLES}><CpfWithdrawalRulesPage /></Protected>} />
       <Route path="/payroll/trust/incoming-transfers" element={<Protected roles={CPF_TRUST_ROLES}><IncomingTransfersPage /></Protected>} />
       <Route path="/payroll/trust/loans" element={<Protected roles={CPF_TRUST_ROLES}><CpfLoansPage /></Protected>} />
+      <Route path="/admin/cpf/disputes" element={<Protected roles={CPF_TRUST_ROLES}><CpfDisputeAdminPage /></Protected>} />
+
+      {/* Co-operative (JCIECCS) - see nav-config.ts's own comment for why this is four sibling nav
+          groups rather than one 3-level "Co-operative" parent; routes are flat here regardless, same
+          as every other module in this file. */}
+      <Route path="/jcieccs" element={<Protected roles={JCIECCS_ROLES}><JciEccsDashboardPage /></Protected>} />
+      <Route path="/jcieccs/members/directory" element={<Protected roles={JCIECCS_ROLES}><MemberDirectoryPage /></Protected>} />
+      <Route path="/jcieccs/members/thrift-ledger" element={<Protected roles={JCIECCS_ROLES}><ThriftLedgerPage /></Protected>} />
+      <Route path="/jcieccs/members/staging" element={<Protected roles={JCIECCS_MIGRATION_ROLES}><MemberStagingPage /></Protected>} />
+      <Route path="/jcieccs/loans/active" element={<Protected roles={JCIECCS_ROLES}><ActiveLoansPage /></Protected>} />
+      <Route path="/jcieccs/loans/apply" element={<Protected roles={JCIECCS_ROLES}><ApplyLoanPage /></Protected>} />
+      <Route path="/jcieccs/loans/restructure" element={<Protected roles={JCIECCS_ROLES}><RestructureTopUpPage /></Protected>} />
+      <Route path="/jcieccs/loans/cash-repayment" element={<Protected roles={JCIECCS_ROLES}><CashRepaymentPage /></Protected>} />
+      <Route path="/jcieccs/payroll-recovery/demands" element={<Protected roles={JCIECCS_ROLES}><PayrollDemandsPage /></Protected>} />
+      <Route path="/jcieccs/payroll-recovery/reconciliation" element={<Protected roles={JCIECCS_ROLES}><DeductionReconciliationPage /></Protected>} />
+      <Route path="/jcieccs/payroll-recovery/audit-trail" element={<Protected roles={JCIECCS_ROLES}><AuditTrailPage /></Protected>} />
+      <Route path="/jcieccs/payroll-recovery/integrity-check" element={<Protected roles={JCIECCS_ROLES}><IntegrityCheckPage /></Protected>} />
+      <Route path="/jcieccs/settlement/no-dues" element={<Protected roles={JCIECCS_SETTLEMENT_ROLES}><SeparationClearancePage /></Protected>} />
 
       <Route path="/audit-logs" element={<Protected roles={SUPER_ADMIN_ROLES}><AuditLogViewerPage /></Protected>} />
       {/* Widened from SUPER_ADMIN-only: PostMasterController and every master this console edits (besides states/districts, gated within the page itself) already accept HR_ADMIN at the API level - see nav-config.ts's NAV_ENTRIES comment. */}

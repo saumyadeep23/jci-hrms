@@ -140,6 +140,9 @@ class MidMonthPromotionTransferTransitPayrollTest {
     @Mock private EmployeeCeaClaimRepository ceaClaimRepository;
     @Mock private in.gov.jci.hrms.repository.EmployeeSuspensionRecordRepository suspensionRecordRepository;
     @Mock private in.gov.jci.hrms.repository.EmployeeSuspensionNecRepository suspensionNecRepository;
+    @Mock private in.gov.jci.hrms.service.PayrollQueryService payrollQueryService;
+    @Mock private CpfLoanPayrollRecoveryResolverService cpfLoanPayrollRecoveryResolverService;
+    @Mock private JciEccsPayrollRecoveryResolverService jciEccsPayrollRecoveryResolverService;
     @Mock private in.gov.jci.hrms.repository.EmployeeDeputationRecordRepository deputationRecordRepository;
 
     private PayrollBatchComputationService service;
@@ -158,7 +161,10 @@ class MidMonthPromotionTransferTransitPayrollTest {
                 dailyAttendanceRepository, payrollHraRateRepository, transportAllowanceRateRepository, ptaxSlabRepository,
                 stateMasterRepository, payrollStatutoryParameterRepository, npsDeclarationRepository, vehicleAllotmentRepository,
                 quarterAllotmentService, encashmentRepository, payrollMovementInputRepository, payrollTdsEngine, payrollTaxOverrideRepository, ceaClaimRepository,
-                suspensionRecordRepository, suspensionNecRepository, deputationRecordRepository);
+                suspensionRecordRepository, suspensionNecRepository, deputationRecordRepository, payrollQueryService,
+                cpfLoanPayrollRecoveryResolverService, jciEccsPayrollRecoveryResolverService);
+        when(cpfLoanPayrollRecoveryResolverService.resolve(any(), any())).thenReturn(CpfLoanPayrollRecoveryResolverService.RecoveryAmounts.ZERO);
+        when(jciEccsPayrollRecoveryResolverService.resolve(any(), any())).thenReturn(JciEccsPayrollRecoveryResolverService.RecoveryAmounts.ZERO);
 
         batch = new PayrollBatch("BATCH-2026-09", 9, 2026, "2026-2027");
         ReflectionTestUtils.setField(batch, "id", 900L);
