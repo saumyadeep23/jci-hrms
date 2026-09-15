@@ -8,6 +8,7 @@ import in.gov.jci.hrms.repository.PayrollBatchRepository;
 import in.gov.jci.hrms.security.SecurityUtils;
 import in.gov.jci.hrms.service.JciEccsCollectionSnapshotService;
 import in.gov.jci.hrms.service.JciEccsDebitConfirmationService;
+import in.gov.jci.hrms.util.DeadlockRetryTemplate;
 import jakarta.validation.Valid;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -32,12 +33,15 @@ public class JciEccsPayrollBatchController {
     private final JciEccsCollectionSnapshotService snapshotService;
     private final JciEccsDebitConfirmationService debitConfirmationService;
     private final PayrollBatchRepository payrollBatchRepository;
+    private final DeadlockRetryTemplate deadlockRetryTemplate;
 
     public JciEccsPayrollBatchController(JciEccsCollectionSnapshotService snapshotService,
-                                          JciEccsDebitConfirmationService debitConfirmationService, PayrollBatchRepository payrollBatchRepository) {
+                                          JciEccsDebitConfirmationService debitConfirmationService, PayrollBatchRepository payrollBatchRepository,
+                                          DeadlockRetryTemplate deadlockRetryTemplate) {
         this.snapshotService = snapshotService;
         this.debitConfirmationService = debitConfirmationService;
         this.payrollBatchRepository = payrollBatchRepository;
+        this.deadlockRetryTemplate = deadlockRetryTemplate;
     }
 
     @PostMapping("/snapshot")
@@ -47,11 +51,15 @@ public class JciEccsPayrollBatchController {
         return snapshotService.generateSnapshot(payrollRunId, payrollBatch, performedByEmployeeId);
     }
 
+    /** Wrapped in {@link DeadlockRetryTemplate}: this call and a concurrent cash repayment against a loan
+     * touched by the same batch line can legitimately acquire their shared rows in different orders under
+     * real load, occasionally losing a Postgres deadlock race - always safe to retry, since every effect
+     * here is idempotent on the collection_detail's own debitStatus gate. */
     @PostMapping("/confirm-debit")
     public JciEccsCollectionBatchResponse confirmDebit(@PathVariable String payrollRunId,
                                                          @Valid @RequestBody JciEccsDebitConfirmationRequest request, Authentication authentication) {
         Long performedByEmployeeId = SecurityUtils.currentEmployeeId(authentication);
-        return debitConfirmationService.confirmDebit(payrollRunId, request, performedByEmployeeId);
+        return deadlockRetryTemplate.execute(() -> debitConfirmationService.confirmDebit(payrollRunId, request, performedByEmployeeId));
     }
 
     @GetMapping("/reconciliation")

@@ -19,9 +19,14 @@ public interface JciEccsLoanRepository extends JpaRepository<JciEccsLoan, Long> 
     List<JciEccsLoan> findByMember_IdOrderByCreatedAtDesc(Long memberId);
 
     /** Phase 4 - the "Active Loans" listing/dashboard KPI source (previously no list-all endpoint
-     * existed at all; ActiveLoansPage.tsx documented this exact gap). */
-    List<JciEccsLoan> findByStatusOrderByCreatedAtDesc(JciEccsLoanStatus status);
+     * existed at all; ActiveLoansPage.tsx documented this exact gap). JOIN FETCH loanProduct/
+     * disbursementCycle (Phase 5 hardening): JciEccsLoanResponse.from reads both associations' own
+     * non-id fields (productCode, cycleCode) for every row, which would otherwise be a per-row lazy
+     * initialization - a real N+1 on this exact list/dashboard path, not a speculative one. */
+    @Query("SELECT l FROM JciEccsLoan l JOIN FETCH l.loanProduct JOIN FETCH l.disbursementCycle WHERE l.status = :status ORDER BY l.createdAt DESC")
+    List<JciEccsLoan> findByStatusOrderByCreatedAtDesc(@Param("status") JciEccsLoanStatus status);
 
+    @Query("SELECT l FROM JciEccsLoan l JOIN FETCH l.loanProduct JOIN FETCH l.disbursementCycle ORDER BY l.createdAt DESC")
     List<JciEccsLoan> findAllByOrderByCreatedAtDesc();
 
     /** One active Term/Emergency loan per member at a time is the practical norm this module enforces

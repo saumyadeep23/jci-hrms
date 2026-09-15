@@ -5,6 +5,7 @@ import in.gov.jci.hrms.entity.JciEccsLoanRepayment;
 import in.gov.jci.hrms.entity.JciEccsLoanStatus;
 import in.gov.jci.hrms.entity.JciEccsRecovery;
 import in.gov.jci.hrms.entity.JciEccsRecoveryAllocation;
+import in.gov.jci.hrms.entity.JciEccsRecoveryComponent;
 import in.gov.jci.hrms.entity.JciEccsRecoverySource;
 import in.gov.jci.hrms.entity.JciEccsRepaymentSource;
 import in.gov.jci.hrms.exception.MasterDataNotFoundException;
@@ -108,13 +109,27 @@ public class JciEccsIntegrityCheckService {
         List<JciEccsLoanRepayment> ledgerRows = loanRepaymentRepository.findByRecovery_Id(recoveryId);
         BigDecimal sumPosted = ledgerRows.stream()
                 .map(r -> r.getPrincipalAmount().add(r.getInterestAmount())).reduce(BigDecimal.ZERO, BigDecimal::add);
+        // The THRIFT leg posts to jcieccs_thrift_transaction, not jcieccs_loan_repayment - it has no
+        // recovery_id FK of its own to query back by (postThriftContribution only links it via
+        // collection_detail_id + a free-text remarks note), but JciEccsRecoveryPostingService always posts
+        // the THRIFT allocation's full amount with no partial-application path (unlike TERM/EMERGENCY
+        // principal/interest, which the posting-time cap can legitimately reduce - see
+        // JciEccsRecoveryPostingService#postLedgerAndBalance's own excessPrincipal handling), so the
+        // allocation row's own amount IS what was posted for that leg.
+        BigDecimal sumThriftPosted = allocations.stream()
+                .filter(a -> a.getComponent() == JciEccsRecoveryComponent.THRIFT)
+                .map(JciEccsRecoveryAllocation::getAllocatedAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
+        sumPosted = sumPosted.add(sumThriftPosted);
 
         // grossAmount is what was OFFERED (e.g. the full payroll debit even under an over-debit); allocated
         // is capped at expected. They only need to agree when there was no capping (grossAmount <= what
         // could legitimately be allocated) - a genuine over-debit is Phase 1's own RECONCILIATION_REQUIRED
         // case, already surfaced by JciEccsReconciliationService, so this check only flags allocated vs
         // posted drifting apart, which should never happen given Phase 1's synchronous posting design.
-        if (sumAllocated.compareTo(sumPosted) != 0) {
+        // A posting-time principal cap (Phase 5 hardening, JciEccsRecoveryPostingService#postLedgerAndBalance)
+        // is the one legitimate exception - it always accompanies a RECONCILIATION_REQUIRED recovery status,
+        // so it's excluded here rather than flagged as a false integrity violation.
+        if (sumAllocated.compareTo(sumPosted) != 0 && recovery.getStatus() != in.gov.jci.hrms.entity.JciEccsRecoveryStatus.RECONCILIATION_REQUIRED) {
             results.add(IntegrityCheckResult.of("RECOVERY_ALLOCATION_POSTING", "JCIECCS_RECOVERY", recoveryId, Severity.CRITICAL,
                     "Sum of allocated amounts does not match sum posted to the ledger", sumAllocated, sumPosted));
         }

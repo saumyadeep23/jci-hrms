@@ -2,6 +2,7 @@ package in.gov.jci.hrms.controller;
 
 import in.gov.jci.hrms.dto.JciEccsRecoveryResponse;
 import in.gov.jci.hrms.entity.JciEccsRecovery;
+import in.gov.jci.hrms.entity.JciEccsRecoveryAllocation;
 import in.gov.jci.hrms.repository.JciEccsRecoveryAllocationRepository;
 import in.gov.jci.hrms.repository.JciEccsRecoveryRepository;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -12,6 +13,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * The priority-cascade recovery/allocation audit trail (spec section 66) - read-only over the Phase 1/2
@@ -32,6 +35,9 @@ public class JciEccsRecoveryController {
         this.allocationRepository = allocationRepository;
     }
 
+    /** Phase 5 hardening: allocations for the whole page are fetched in ONE query (grouped here by
+     * recovery id) instead of one query per recovery row - a real N+1 on this exact page (up to 100 extra
+     * queries per load), not a speculative one. */
     @GetMapping
     public List<JciEccsRecoveryResponse> list(@RequestParam(required = false) Long memberId, @RequestParam(required = false) Long loanId) {
         List<JciEccsRecovery> recoveries;
@@ -42,8 +48,11 @@ public class JciEccsRecoveryController {
         } else {
             recoveries = recoveryRepository.findTop100ByOrderByCreatedAtDesc();
         }
+        Map<Long, List<JciEccsRecoveryAllocation>> allocationsByRecoveryId =
+                allocationRepository.findByRecovery_IdIn(recoveries.stream().map(JciEccsRecovery::getId).toList())
+                        .stream().collect(Collectors.groupingBy(a -> a.getRecovery().getId()));
         return recoveries.stream()
-                .map(r -> JciEccsRecoveryResponse.from(r, allocationRepository.findByRecovery_IdOrderByAllocationSequenceAsc(r.getId())))
+                .map(r -> JciEccsRecoveryResponse.from(r, allocationsByRecoveryId.getOrDefault(r.getId(), List.of())))
                 .toList();
     }
 

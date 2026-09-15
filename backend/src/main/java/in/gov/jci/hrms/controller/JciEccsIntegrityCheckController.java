@@ -3,6 +3,7 @@ package in.gov.jci.hrms.controller;
 import in.gov.jci.hrms.dto.JciEccsIntegrityCheckResultResponse;
 import in.gov.jci.hrms.security.SecurityUtils;
 import in.gov.jci.hrms.service.JciEccsIntegrityCheckService;
+import in.gov.jci.hrms.service.JciEccsMigratedLoanValidationService;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -24,9 +25,12 @@ import java.util.List;
 public class JciEccsIntegrityCheckController {
 
     private final JciEccsIntegrityCheckService integrityCheckService;
+    private final JciEccsMigratedLoanValidationService migratedLoanValidationService;
 
-    public JciEccsIntegrityCheckController(JciEccsIntegrityCheckService integrityCheckService) {
+    public JciEccsIntegrityCheckController(JciEccsIntegrityCheckService integrityCheckService,
+                                            JciEccsMigratedLoanValidationService migratedLoanValidationService) {
         this.integrityCheckService = integrityCheckService;
+        this.migratedLoanValidationService = migratedLoanValidationService;
     }
 
     @PostMapping("/run")
@@ -42,6 +46,15 @@ public class JciEccsIntegrityCheckController {
     @GetMapping("/recoveries/{recoveryId}")
     public List<JciEccsIntegrityCheckResultResponse> checkRecovery(@PathVariable Long recoveryId) {
         return toResponses(integrityCheckService.checkRecovery(recoveryId));
+    }
+
+    /** Phase 5 (spec sections 7-8) - validates the minimum runtime contract for a loan the authorized
+     * administrator inserted directly through pgAdmin, before it's trusted to re-enter the normal payroll
+     * lifecycle. See {@link JciEccsMigratedLoanValidationService}'s own javadoc for why this is a separate
+     * check from {@link #checkLoan}, not a variant of it. */
+    @GetMapping("/loans/{loanId}/migration-validate")
+    public List<JciEccsIntegrityCheckResultResponse> validateMigratedLoan(@PathVariable Long loanId) {
+        return toResponses(migratedLoanValidationService.validate(loanId));
     }
 
     @PostMapping("/payroll-runs/{payrollRunId}/run")

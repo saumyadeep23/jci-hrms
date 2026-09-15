@@ -10,6 +10,8 @@ public interface JciEccsThriftTransactionRepository extends JpaRepository<JciEcc
 
     Optional<JciEccsThriftTransaction> findTopByMember_IdOrderByIdDesc(Long memberId);
 
+    List<JciEccsThriftTransaction> findByMember_Id(Long memberId);
+
     /** Phase 2 reconciliation - every thrift ledger row (CONTRIBUTION + REFUND) ever posted against one
      * collection_detail line. */
     List<JciEccsThriftTransaction> findByCollectionDetail_Id(Long collectionDetailId);

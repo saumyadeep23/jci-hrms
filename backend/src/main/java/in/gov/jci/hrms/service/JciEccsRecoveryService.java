@@ -12,7 +12,9 @@ import in.gov.jci.hrms.entity.JciEccsRecoveryStatus;
 import in.gov.jci.hrms.entity.JciEccsScheduleStatus;
 import in.gov.jci.hrms.exception.BusinessRuleViolationException;
 import in.gov.jci.hrms.exception.MasterDataNotFoundException;
+import in.gov.jci.hrms.repository.JciEccsLoanRepository;
 import in.gov.jci.hrms.repository.JciEccsLoanScheduleRepository;
+import in.gov.jci.hrms.repository.JciEccsMemberRepository;
 import in.gov.jci.hrms.repository.JciEccsRecoveryAllocationRepository;
 import in.gov.jci.hrms.repository.JciEccsRecoveryRepository;
 import org.springframework.stereotype.Service;
@@ -41,16 +43,21 @@ public class JciEccsRecoveryService {
     private final JciEccsRecoveryAllocationService allocationService;
     private final JciEccsRecoveryPostingService postingService;
     private final JciEccsLoanScheduleRepository scheduleRepository;
+    private final JciEccsLoanRepository loanRepository;
+    private final JciEccsMemberRepository memberRepository;
     private final JciEccsLifecycleEventService lifecycleEventService;
 
     public JciEccsRecoveryService(JciEccsRecoveryRepository recoveryRepository, JciEccsRecoveryAllocationRepository allocationRepository,
                                    JciEccsRecoveryAllocationService allocationService, JciEccsRecoveryPostingService postingService,
-                                   JciEccsLoanScheduleRepository scheduleRepository, JciEccsLifecycleEventService lifecycleEventService) {
+                                   JciEccsLoanScheduleRepository scheduleRepository, JciEccsLoanRepository loanRepository,
+                                   JciEccsMemberRepository memberRepository, JciEccsLifecycleEventService lifecycleEventService) {
         this.recoveryRepository = recoveryRepository;
         this.allocationRepository = allocationRepository;
         this.allocationService = allocationService;
         this.postingService = postingService;
         this.scheduleRepository = scheduleRepository;
+        this.loanRepository = loanRepository;
+        this.memberRepository = memberRepository;
         this.lifecycleEventService = lifecycleEventService;
     }
 
@@ -76,6 +83,25 @@ public class JciEccsRecoveryService {
                     .stream().map(JciEccsRecoveryAllocation::getAllocatedAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
             return new PayrollRecoveryResult(existing.get(), totalAllocated);
         }
+
+        // Lock every row this recovery's own INSERTs are about to reference (term loan, emergency loan,
+        // member) explicitly and FIRST, in that fixed LOAN-then-MEMBER order - Postgres takes an implicit
+        // FOR KEY SHARE lock on a row the moment any other row is inserted referencing it via FK, and a
+        // later explicit FOR NO KEY UPDATE request (postThriftContribution's member lock,
+        // postLedgerAndBalance's loan lock) against a row already implicitly locked by a DIFFERENT
+        // concurrent transaction deadlocks instead of queueing (Phase 5 hardening - reproduced as a genuine
+        // two-thread Postgres deadlock on jcieccs_loan when a cash repayment and a payroll recovery raced
+        // the same loan). The order matters as much as the locking itself: JciEccsLoanService.postCashRepayment
+        // always locks the loan before this service's own recovery/allocation inserts implicitly touch the
+        // member - locking member before loan here would deadlock the OTHER way (cash holds loan wants
+        // member, payroll holds member wants loan). Every code path must acquire loan before member.
+        if (detail.getTermLoan() != null) {
+            loanRepository.findByIdForUpdate(detail.getTermLoan().getId());
+        }
+        if (detail.getEmergencyLoan() != null) {
+            loanRepository.findByIdForUpdate(detail.getEmergencyLoan().getId());
+        }
+        memberRepository.findByIdForUpdate(detail.getMember().getId());
 
         Map<JciEccsRecoveryComponent, BigDecimal> expected = new EnumMap<>(JciEccsRecoveryComponent.class);
         expected.put(JciEccsRecoveryComponent.THRIFT, detail.getThriftAmount());
@@ -241,6 +267,14 @@ public class JciEccsRecoveryService {
         if (existingReversal.isPresent()) {
             return existingReversal.get();
         }
+
+        // Same reasoning and the same fixed LOAN-then-MEMBER order as createAndPostPayrollRecovery's own
+        // pre-lock above (see its comment) - acquire loan, then member, explicitly before this reversal's
+        // own recovery/allocation rows implicitly FK-reference them.
+        if (original.getLoan() != null) {
+            loanRepository.findByIdForUpdate(original.getLoan().getId());
+        }
+        memberRepository.findByIdForUpdate(original.getMember().getId());
 
         List<JciEccsRecoveryAllocation> originalAllocations = allocationRepository.findByRecovery_IdOrderByAllocationSequenceAsc(recoveryId);
         JciEccsRecovery reversal = recoveryRepository.save(new JciEccsRecovery(original.getMember(), original.getLoan(),

@@ -31,6 +31,7 @@ import in.gov.jci.hrms.repository.JciEccsRecoveryAllocationRepository;
 import in.gov.jci.hrms.repository.JciEccsRecoveryRepository;
 import in.gov.jci.hrms.repository.JciEccsThriftTransactionRepository;
 import in.gov.jci.hrms.repository.PayrollBatchRepository;
+import in.gov.jci.hrms.util.DeadlockRetryTemplate;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -45,6 +46,7 @@ import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -76,8 +78,19 @@ class JciEccsConcurrencyHardeningTest {
     @Autowired private JciEccsLoanRepaymentRepository loanRepaymentRepository;
     @Autowired private JciEccsCollectionDetailRepository collectionDetailRepository;
     @Autowired private JciEccsThriftTransactionRepository thriftTransactionRepository;
+    @Autowired private DeadlockRetryTemplate deadlockRetryTemplate;
 
-    private static final LocalDate DISBURSEMENT_DATE = LocalDate.of(2091, 5, 10);
+    // JciEccsCollectionSnapshotService.generateSnapshot is a whole-of-cooperative operation - it snapshots
+    // EVERY currently-ACTIVE JciEccsMember in the database into the one JciEccsCollectionBatch for a given
+    // (month, year), not just the member passed in. Against this dev database that batch ends up shared
+    // with 100+ pre-existing real members the moment it's created. Two consequences drive the design below:
+    // (1) tearDown must NEVER delete the batch or iterate "every collection_detail in the batch" - only the
+    // one row belonging to this test's own employee, or it would destroy unrelated real data; (2) the
+    // (month, year) must be fresh on every single invocation (never reused, never deleted), since a repeat
+    // generateSnapshot call for an existing payrollRunId is itself idempotent and returns the frozen
+    // original snapshot verbatim - a member created after that point would simply never be included.
+    // hrms_payroll_cycle.cycle_code is VARCHAR(7) ("YYYY-MM") - the year component must stay 4 digits.
+    private static final AtomicInteger CYCLE_SEQ = new AtomicInteger((int) (System.currentTimeMillis() % 90_000));
 
     private Department department;
     private Designation designation;
@@ -86,15 +99,27 @@ class JciEccsConcurrencyHardeningTest {
     private PayrollBatch payrollBatch;
     private String payrollRunId;
     private Long loanId;
+    private int cycleYear;
+    private int cycleMonth;
+    private LocalDate disbursementDate;
 
     @BeforeEach
     void setUp() {
+        // seq itself (not cycleYear, which only changes once every 12 increments) is the uniqueness source
+        // for employee/member codes - two test methods in the same run can share a cycleYear (different
+        // cycleMonth keeps the payroll batch's own (month,year) constraint satisfied) but must never share
+        // an employee/membership code.
+        int seq = CYCLE_SEQ.incrementAndGet();
+        cycleYear = 2200 + (seq / 12);
+        cycleMonth = 1 + (seq % 12);
+        disbursementDate = LocalDate.of(cycleYear, cycleMonth, 10);
+
         department = departmentRepository.save(new Department("JECCSCONC", "JCIECCS Concurrency Test Dept"));
         designation = designationRepository.save(new Designation("JCIECCS Concurrency Test Officer"));
-        employee = employeeRepository.save(new Employee("EMP-JECCSCONC-1", "Race", "Tester", "jeccsconc1@example.com",
+        employee = employeeRepository.save(new Employee("EMP-JECCSCONC-" + seq, "Race", "Tester", "jeccsconc" + seq + "@example.com",
                 LocalDate.now().minusYears(5), department, designation));
 
-        member = new JciEccsMember(employee.getId(), "JECCS-CONC-0001", LocalDate.now().minusYears(3), LocalDate.now().minusYears(3));
+        member = new JciEccsMember(employee.getId(), "JECCS-CONC-" + seq, LocalDate.now().minusYears(3), LocalDate.now().minusYears(3));
         member.setThriftMonthlyAmount(new BigDecimal("500.00"));
         member = memberRepository.save(member);
 
@@ -102,32 +127,55 @@ class JciEccsConcurrencyHardeningTest {
         // on 120000 opening = 1000.00. Total expected this cycle: thrift 500 + interest 1000 + principal
         // 10000 = 11500.
         var created = loanService.createLoan(new JciEccsLoanCreateRequest(employee.getEmployeeCode(), JciEccsLoanProductCode.TERM,
-                new BigDecimal("120000"), 12, DISBURSEMENT_DATE, DISBURSEMENT_DATE, DISBURSEMENT_DATE), employee.getId(), "tester");
+                new BigDecimal("120000"), 12, disbursementDate, disbursementDate, disbursementDate), employee.getId(), "tester");
         loanId = created.id();
 
-        payrollBatch = payrollBatchRepository.save(new PayrollBatch("PB-JECCSCONC-2091-05", 5, 2091, "2090-2091"));
+        payrollBatch = payrollBatchRepository.save(new PayrollBatch("PB-JECCSCONC-" + seq, cycleMonth, cycleYear,
+                cycleYear + "-" + (cycleYear + 1)));
         payrollRunId = payrollBatch.getId().toString();
         snapshotService.generateSnapshot(payrollRunId, payrollBatch, employee.getId());
     }
 
     @AfterEach
     void tearDown() {
-        attempt(() -> { if (loanId != null) loanRepaymentRepository.findByRecovery_Id(-1L); }); // no-op warm-up, keeps ordering explicit
+        // jcieccs_loan_repayment.recovery_allocation_id references jcieccs_recovery_allocation - the
+        // ledger rows must go first, allocations second, or the allocation delete is FK-blocked.
         attempt(() -> { if (member != null) recoveryRepository.findByMember_IdOrderByCreatedAtDesc(member.getId())
-                .forEach(r -> { allocationRepository.findByRecovery_IdOrderByAllocationSequenceAsc(r.getId()).forEach(allocationRepository::delete);
-                                loanRepaymentRepository.findByRecovery_Id(r.getId()).forEach(loanRepaymentRepository::delete); }); });
+                .forEach(r -> loanRepaymentRepository.findByRecovery_Id(r.getId()).forEach(loanRepaymentRepository::delete)); });
+        attempt(() -> { if (member != null) recoveryRepository.findByMember_IdOrderByCreatedAtDesc(member.getId())
+                .forEach(r -> allocationRepository.findByRecovery_IdOrderByAllocationSequenceAsc(r.getId()).forEach(allocationRepository::delete)); });
         attempt(() -> { if (member != null) recoveryRepository.findByMember_IdOrderByCreatedAtDesc(member.getId()).forEach(recoveryRepository::delete); });
-        attempt(() -> { if (member != null) thriftTransactionRepository.findTopByMember_IdOrderByIdDesc(member.getId())
-                .ifPresent(t -> deleteAllThriftForMember(member.getId())); });
-        attempt(() -> { if (payrollBatch != null) collectionDetailRepository.findByBatch_IdOrderByEmployeeIdAsc(payrollBatch.getId()).forEach(collectionDetailRepository::delete); });
-        attempt(() -> { if (payrollBatch != null) payrollBatchRepository.deleteById(payrollBatch.getId()); });
-        attempt(() -> { if (loanId != null) scheduleRepository.findByLoan_IdOrderByInstallmentNoAsc(loanId).forEach(scheduleRepository::delete); });
-        attempt(() -> loanRepository.findAll().stream().filter(l -> l.getMember() != null && l.getMember().getId().equals(member.getId()))
-                .forEach(l -> loanRepository.deleteById(l.getId())));
-        attempt(() -> { if (member != null) memberRepository.deleteById(member.getId()); });
-        attempt(() -> { if (employee != null) employeeRepository.delete(employee); });
+        attempt(() -> { if (member != null) deleteAllThriftForMember(member.getId()); });
+        // Only this test's own single collection_detail row - never the batch, never any other member's
+        // row (see this class's own javadoc above on why the batch is a shared, permanent fixture).
+        // findByBatch_PayrollRunIdAndEmployeeId, NOT findByBatch_IdAndEmployeeId(payrollBatch.getId(), ...)
+        // - payrollBatch.getId() is the source PayrollBatch's own id, a different sequence entirely from
+        // JciEccsCollectionDetail.batch (a JciEccsCollectionBatch), which is looked up by payrollRunId.
+        attempt(() -> { if (payrollRunId != null && employee != null)
+                collectionDetailRepository.findByBatch_PayrollRunIdAndEmployeeId(payrollRunId, employee.getId())
+                        .ifPresent(collectionDetailRepository::delete); });
+        // A restructure/top-up test leaves a SEPARATE child loan (parent_loan_id -> loanId) with its own,
+        // separately-generated schedule rows - both loans' schedules must be cleared, not just the
+        // original's, or the child loan delete below is FK-blocked by its own still-existing schedule.
+        attempt(() -> { if (loanId != null) loanRepository.findAll().stream()
+                .filter(l -> l.getId().equals(loanId) || (l.getParentLoan() != null && l.getParentLoan().getId().equals(loanId)))
+                .forEach(l -> scheduleRepository.findByLoan_IdOrderByInstallmentNoAsc(l.getId()).forEach(scheduleRepository::delete)); });
+        // Child (restructured-into) loans reference the original via parent_loan_id - delete those before
+        // the original, or the self-referencing FK blocks deleting the parent first.
+        attempt(() -> { if (loanId != null) loanRepository.findAll().stream()
+                .filter(l -> l.getParentLoan() != null && l.getParentLoan().getId().equals(loanId))
+                .forEach(l -> loanRepository.deleteById(l.getId())); });
+        attempt(() -> { if (loanId != null) loanRepository.deleteById(loanId); });
+        // Employee deletion only runs if member deletion actually succeeded - employeeId has no real DB FK
+        // from jcieccs_member (it's a plain Long column), so deleting the employee first would silently
+        // leave a member row with a dangling employeeId reference forever, invisible to any FK check.
+        boolean memberDeleted = attemptTracked(() -> { if (member != null) memberRepository.deleteById(member.getId()); });
+        if (memberDeleted) {
+            attempt(() -> { if (employee != null) employeeRepository.delete(employee); });
+        }
         attempt(() -> { if (department != null) departmentRepository.delete(department); });
         attempt(() -> { if (designation != null) designationRepository.delete(designation); });
+        // payrollBatch/jcieccs_collection_batch are deliberately never deleted - see class javadoc.
     }
 
     private void deleteAllThriftForMember(Long memberId) {
@@ -136,10 +184,16 @@ class JciEccsConcurrencyHardeningTest {
     }
 
     private void attempt(Runnable step) {
+        attemptTracked(step);
+    }
+
+    private boolean attemptTracked(Runnable step) {
         try {
             step.run();
+            return true;
         } catch (Exception ignored) {
             // best-effort cleanup - one failing step must never skip the rest
+            return false;
         }
     }
 
@@ -197,7 +251,7 @@ class JciEccsConcurrencyHardeningTest {
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
             JciEccsCashRepaymentRequest request = new JciEccsCashRepaymentRequest(new BigDecimal("30000"), BigDecimal.ZERO,
-                    LocalDate.of(2091, 6, 1), "RCPT-RACE-B", "IDEMP-RACE-B");
+                    disbursementDate.plusDays(20), "RCPT-RACE-B", "IDEMP-RACE-B");
             Runnable call = () -> loanService.postCashRepayment(loanId, request, employee.getId());
 
             CompletableFuture<Object> first = raceCall(barrier, call, executor);
@@ -228,12 +282,16 @@ class JciEccsConcurrencyHardeningTest {
         try {
             // Pays off the entire 120000 principal in one shot via cash.
             JciEccsCashRepaymentRequest cashRequest = new JciEccsCashRepaymentRequest(new BigDecimal("120000"), new BigDecimal("1000.00"),
-                    LocalDate.of(2091, 5, 20), "RCPT-RACE-C", "IDEMP-RACE-C");
-            Runnable cashCall = () -> loanService.postCashRepayment(loanId, cashRequest, employee.getId());
-            Runnable payrollCall = () -> debitConfirmationService.confirmDebit(payrollRunId,
+                    disbursementDate.plusDays(10), "RCPT-RACE-C", "IDEMP-RACE-C");
+            // Wrapped in DeadlockRetryTemplate, exactly as JciEccsLoanController/JciEccsPayrollBatchController
+            // wrap these same two calls in production - a genuine Postgres deadlock between two independent
+            // lock-acquisition paths racing the same loan+collection_detail is an expected, retry-safe
+            // outcome (both operations are idempotent on their own key), not a raw error a caller should see.
+            Runnable cashCall = () -> deadlockRetryTemplate.execute(() -> loanService.postCashRepayment(loanId, cashRequest, employee.getId()));
+            Runnable payrollCall = () -> deadlockRetryTemplate.execute(() -> debitConfirmationService.confirmDebit(payrollRunId,
                     new JciEccsDebitConfirmationRequest(List.of(new JciEccsDebitConfirmationLineRequest(employee.getId(),
                             JciEccsDebitStatus.DEBIT_SUCCESS, null, "TXN-RACE-C"))),
-                    employee.getId());
+                    employee.getId()));
 
             CompletableFuture<Object> cash = raceCall(barrier, cashCall, executor);
             CompletableFuture<Object> payroll = raceCall(barrier, payrollCall, executor);
@@ -246,14 +304,29 @@ class JciEccsConcurrencyHardeningTest {
             assertThat(finalLoan.getStatus()).isEqualTo(JciEccsLoanStatus.CLOSED);
 
             List<JciEccsRecovery> recoveries = recoveryRepository.findByMember_IdOrderByCreatedAtDesc(member.getId());
-            assertThat(recoveries).hasSize(2); // one CASH, one PAYROLL - both real, neither silently dropped
-            boolean anyReconciliationRequired = recoveries.stream().anyMatch(r -> r.getStatus() == JciEccsRecoveryStatus.RECONCILIATION_REQUIRED);
-            boolean bothFullyPosted = recoveries.stream().allMatch(r -> r.getStatus() == JciEccsRecoveryStatus.POSTED);
-            // Exactly one of these two outcomes is valid depending on which recovery won the lock race -
-            // either both legitimately fit (cash first, small remaining payroll principal was zero so
-            // nothing to over-recover), or the loser's full amount was already-collected-but-unneeded
-            // principal, which must be flagged rather than silently pushing the balance negative.
-            assertThat(anyReconciliationRequired || bothFullyPosted).isTrue();
+            var detailAfter = collectionDetailRepository.findByBatch_PayrollRunIdAndEmployeeId(payrollRunId, employee.getId()).orElseThrow();
+            if (recoveries.size() == 1) {
+                // Cash won outright and its own flagLockedSnapshotIfAny correctly flipped this still-PENDING_DEBIT
+                // line to RECONCILIATION_REQUIRED before payroll's (possibly retried) attempt ever reached it -
+                // JciEccsDebitConfirmationService.processLine's own PENDING_DEBIT gate then correctly skips a
+                // line that's no longer PENDING_DEBIT, rather than posting a payroll recovery the operator
+                // still needs to manually reconcile. This is the CASH_RECOVERY_AFTER_SNAPSHOT_LOCK contract
+                // working as designed, not a dropped payroll recovery.
+                assertThat(recoveries.get(0).getSource()).isEqualTo(JciEccsRecoverySource.CASH);
+                assertThat(detailAfter.getDebitStatus()).isEqualTo(in.gov.jci.hrms.entity.JciEccsDebitStatus.RECONCILIATION_REQUIRED);
+                assertThat(detailAfter.getReconciliationReason()).isEqualTo("CASH_RECOVERY_AFTER_SNAPSHOT_LOCK");
+            } else {
+                // Payroll's line was still PENDING_DEBIT when it ran (it won the race, or its retry ran before
+                // cash's flag landed) - both a CASH and a PAYROLL recovery genuinely exist.
+                assertThat(recoveries).hasSize(2);
+                boolean anyReconciliationRequired = recoveries.stream().anyMatch(r -> r.getStatus() == JciEccsRecoveryStatus.RECONCILIATION_REQUIRED);
+                boolean bothFullyPosted = recoveries.stream().allMatch(r -> r.getStatus() == JciEccsRecoveryStatus.POSTED);
+                // Exactly one of these two outcomes is valid depending on which recovery won the lock race -
+                // either both legitimately fit (cash first, remaining payroll principal was zero so nothing
+                // to over-recover), or the loser's full amount was already-collected-but-unneeded principal,
+                // which must be flagged rather than silently pushing the balance negative.
+                assertThat(anyReconciliationRequired || bothFullyPosted).isTrue();
+            }
         } finally {
             executor.shutdownNow();
         }
@@ -324,7 +397,7 @@ class JciEccsConcurrencyHardeningTest {
         try {
             Runnable reversalCall = () -> recoveryService.reverseRecovery(original.getId(), "Race vs new cash", employee.getId());
             JciEccsCashRepaymentRequest cashRequest = new JciEccsCashRepaymentRequest(new BigDecimal("5000"), BigDecimal.ZERO,
-                    LocalDate.of(2091, 5, 22), "RCPT-RACE-D2", "IDEMP-RACE-D2");
+                    disbursementDate.plusDays(12), "RCPT-RACE-D2", "IDEMP-RACE-D2");
             Runnable cashCall = () -> loanService.postCashRepayment(loanId, cashRequest, employee.getId());
 
             CompletableFuture<Object> reversal = raceCall(barrier, reversalCall, executor);
@@ -358,7 +431,7 @@ class JciEccsConcurrencyHardeningTest {
         CyclicBarrier barrier = new CyclicBarrier(2);
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
-            JciEccsRestructureRequest request = new JciEccsRestructureRequest(18, LocalDate.of(2091, 6, 1));
+            JciEccsRestructureRequest request = new JciEccsRestructureRequest(18, disbursementDate.plusMonths(1));
             Runnable call = () -> restructureService.restructure(loanId, request, employee.getId());
 
             CompletableFuture<Object> first = raceCall(barrier, call, executor);

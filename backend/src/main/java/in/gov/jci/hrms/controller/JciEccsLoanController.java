@@ -10,6 +10,7 @@ import in.gov.jci.hrms.entity.JciEccsLoanStatus;
 import in.gov.jci.hrms.security.SecurityUtils;
 import in.gov.jci.hrms.service.JciEccsLoanService;
 import in.gov.jci.hrms.service.JciEccsRestructureService;
+import in.gov.jci.hrms.util.DeadlockRetryTemplate;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -35,10 +36,13 @@ public class JciEccsLoanController {
 
     private final JciEccsLoanService loanService;
     private final JciEccsRestructureService restructureService;
+    private final DeadlockRetryTemplate deadlockRetryTemplate;
 
-    public JciEccsLoanController(JciEccsLoanService loanService, JciEccsRestructureService restructureService) {
+    public JciEccsLoanController(JciEccsLoanService loanService, JciEccsRestructureService restructureService,
+                                  DeadlockRetryTemplate deadlockRetryTemplate) {
         this.loanService = loanService;
         this.restructureService = restructureService;
+        this.deadlockRetryTemplate = deadlockRetryTemplate;
     }
 
     @PostMapping
@@ -65,10 +69,15 @@ public class JciEccsLoanController {
         return loanService.getSchedule(loanId);
     }
 
+    /** Wrapped in {@link DeadlockRetryTemplate}: a concurrent payroll debit confirmation touching the same
+     * loan/collection_detail can legitimately acquire their shared rows in different orders under real
+     * load, occasionally losing a Postgres deadlock race - always safe to retry, since this call is already
+     * idempotent on {@code request.idempotencyKey()}. */
     @PostMapping("/{loanId}/repayments")
     public JciEccsLoanResponse postRepayment(@PathVariable Long loanId, @Valid @RequestBody JciEccsCashRepaymentRequest request,
                                               Authentication authentication) {
-        return loanService.postCashRepayment(loanId, request, SecurityUtils.currentEmployeeId(authentication));
+        Long performedByEmployeeId = SecurityUtils.currentEmployeeId(authentication);
+        return deadlockRetryTemplate.execute(() -> loanService.postCashRepayment(loanId, request, performedByEmployeeId));
     }
 
     @PostMapping("/{loanId}/restructure")
