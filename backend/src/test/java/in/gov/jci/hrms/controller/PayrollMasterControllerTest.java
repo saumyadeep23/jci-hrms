@@ -10,6 +10,7 @@ import in.gov.jci.hrms.dto.PtaxSlabResponse;
 import in.gov.jci.hrms.dto.TransportAllowanceRequest;
 import in.gov.jci.hrms.dto.TransportAllowanceResponse;
 import in.gov.jci.hrms.exception.MasterDataValidationException;
+import in.gov.jci.hrms.security.RbacSecurity;
 import in.gov.jci.hrms.security.SecurityConfig;
 import in.gov.jci.hrms.service.PayrollHraRateService;
 import in.gov.jci.hrms.service.PayrollMasterService;
@@ -29,6 +30,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -54,6 +56,9 @@ class PayrollMasterControllerTest {
 
     @MockBean
     private PayrollStatutoryParameterService payrollStatutoryParameterService;
+
+    @MockBean(name = "rbac")
+    private RbacSecurity rbac;
 
     @Test
     void createTransportAllowance_withValidRequest_returns201() throws Exception {
@@ -206,19 +211,56 @@ class PayrollMasterControllerTest {
                 .andExpect(jsonPath("$.effectiveTo").value("2026-12-31"));
     }
 
-    // Non-financial RBAC migration (docs/security/RBAC_MIGRATION_REPORT.md): SUPER_ADMIN must not be an
-    // alternate approver for statutory/payroll master-data changes merely because it is the technical
-    // administrator - REQUIRES_BUSINESS_CONFIRMATION on the exact final owning role, but the SUPER_ADMIN
-    // bypass itself is closed regardless.
+    // Final RBAC business-authority closure (docs/security/RBAC_MIGRATION_REPORT.md): confirmed
+    // ownership is HR_MAKER_BILL (maker) / HR_ADMIN_BILL (checker/admin) via PAYROLL_MASTER_APPROVE
+    // (V97) - SYSTEM_ADMIN and FIN_ADMIN get no implicit authority merely by role, and HR_MAKER_BILL
+    // is correctly denied this single immediate-mutation endpoint (no separate prepare step exists -
+    // see PayrollMasterServiceImpl.updateSalaryHead()).
+    private in.gov.jci.hrms.dto.SalaryHeadUpdateRequest salaryHeadRequest() {
+        return new in.gov.jci.hrms.dto.SalaryHeadUpdateRequest(
+                "Basic Pay", "BASIC", in.gov.jci.hrms.entity.SalaryHeadEffectType.EARNING, false, "BOTH", 1, true, "1000");
+    }
+
     @Test
     @WithMockUser(roles = "SUPER_ADMIN")
     void updateSalaryHead_withOnlySuperAdminRole_returns403() throws Exception {
-        in.gov.jci.hrms.dto.SalaryHeadUpdateRequest request = new in.gov.jci.hrms.dto.SalaryHeadUpdateRequest(
-                "Basic Pay", "BASIC", in.gov.jci.hrms.entity.SalaryHeadEffectType.EARNING, false, "BOTH", 1, true, "1000");
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/v1/payroll/masters/salary-heads/1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(salaryHeadRequest())))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @WithMockUser(roles = "FINANCE_ADMIN")
+    void updateSalaryHead_asFinanceAdminWithoutExplicitPermission_returns403() throws Exception {
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/v1/payroll/masters/salary-heads/1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(salaryHeadRequest())))
+                .andExpect(status().isForbidden());
+    }
+
+    // HR_MAKER_BILL holds PAYROLL_MASTER_EDIT (V97), not PAYROLL_MASTER_APPROVE - denied from this
+    // checker-only endpoint.
+    @Test
+    void updateSalaryHead_withOnlyEditPermission_returns403() throws Exception {
+        when(rbac.hasPermission(any(), eq("PAYROLL_MASTER_EDIT"))).thenReturn(true);
 
         mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/v1/payroll/masters/salary-heads/1")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(request)))
+                        .content(objectMapper.writeValueAsString(salaryHeadRequest())))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void updateSalaryHead_withApprovePermission_isNotForbidden() throws Exception {
+        when(rbac.hasPermission(any(), eq("PAYROLL_MASTER_APPROVE"))).thenReturn(true);
+        when(payrollMasterService.updateSalaryHead(org.mockito.ArgumentMatchers.eq(1), any())).thenReturn(
+                new in.gov.jci.hrms.dto.SalaryHeadResponse(1, "Basic Pay", "BASIC",
+                        in.gov.jci.hrms.entity.SalaryHeadEffectType.EARNING, false, "BOTH", 1, true, "1000"));
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/v1/payroll/masters/salary-heads/1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(salaryHeadRequest())))
+                .andExpect(status().isOk());
     }
 }

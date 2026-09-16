@@ -72,16 +72,25 @@ public class TerminalSettlementController {
         return saved.stream().map(TerminalSettlementBeneficiaryResponse::from).toList();
     }
 
-    // Non-financial RBAC migration (docs/security/RBAC_MIGRATION_REPORT.md): SUPER_ADMIN removed per
-    // confirmed direction ("SYSTEM_ADMIN must not independently approve terminal financial
-    // settlement"). REQUIRES_BUSINESS_CONFIRMATION: the existing RBAC permission matrix has no distinct
-    // checker permission for terminal settlement (unlike CPF/JCIECCS/Payroll, which have their own
-    // *_ADMIN checker roles) - HR_ADMIN is retained here as the only currently-known authority, but
-    // whether approval should require a role/permission distinct from whoever generates the settlement
-    // (maker != checker, matching the pattern already enforced for CPF/JCIECCS) has not been decided and
-    // is not invented here.
+    // Final RBAC business-authority closure (docs/security/RBAC_MIGRATION_REPORT.md), confirmed
+    // direction: approve() IS the final financial authorization currently implemented in this
+    // lifecycle (DRAFT -> [AUDITED, never reached] -> APPROVED -> [DISBURSED, no code path reaches
+    // it yet] - see TerminalSettlementService.approve()'s own trace) - it validates beneficiary bank
+    // allocation and irreversibly debits the encashed leave ledger, i.e. it is the point past which
+    // the settlement is authorized for payment, not merely an HR data-verification step. It therefore
+    // requires DISBURSEMENT_AUTHORIZE (FIN_ADMIN_DISB's permission, reused as-is - no new permission
+    // needed for this endpoint). HR_ADMIN keeps preview/generate/getById/updateBeneficiaries (the HR
+    // preparation stage) unchanged, but does NOT get this endpoint - SYSTEM_ADMIN and HR_ADMIN are
+    // both denied here.
+    //
+    // FOLLOW_UP_REQUIRED - TERMINAL_SETTLEMENT_MAKER_CHECKER: TerminalSettlement has no preparer/
+    // generatedBy actor column (only `employee`, the settlement's subject, and createdAt/updatedAt
+    // timestamps) - there is no existing data to compare "who generated this settlement" against
+    // "who is approving it" the way CpfLoanApplication.applicantEmployeeId supports SEC-003's
+    // requireDifferentFromApplicant(). Enforcing preparer != approver here would require a schema
+    // change (a new actor column) and is not invented in this closure task.
     @PostMapping("/{id}/approve")
-    @PreAuthorize("hasRole('HR_ADMIN')")
+    @PreAuthorize("@rbac.hasPermission(authentication, 'DISBURSEMENT_AUTHORIZE')")
     public TerminalSettlementResponse approve(@PathVariable Long id) {
         return toResponse(terminalSettlementService.approve(id));
     }

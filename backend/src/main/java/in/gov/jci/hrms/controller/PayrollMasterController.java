@@ -113,15 +113,18 @@ public class PayrollMasterController {
         return payrollMasterService.listSalaryHeads();
     }
 
-    // Non-financial RBAC migration (docs/security/RBAC_MIGRATION_REPORT.md): SUPER_ADMIN removed per
-    // confirmed direction ("SYSTEM_ADMIN must not be an alternate functional approver for payroll/
-    // statutory financial master changes merely because it is the technical administrator").
-    // REQUIRES_BUSINESS_CONFIRMATION: the existing permission matrix's HR_ADMIN_BILL/HR_MAKER_BILL
-    // roles carry only PAYROLL_VIEW/PREPARE/FINALIZE/REVERSE - no permission for editing salary-head/
-    // statutory-head master data is seeded, so HR_ADMIN (the class-level's own read/write default role)
-    // is retained here as the only currently-known authority rather than guessing HR_ADMIN_BILL applies.
+    // Final RBAC business-authority closure (docs/security/RBAC_MIGRATION_REPORT.md), confirmed
+    // ownership: HR_MAKER_BILL prepares, HR_ADMIN_BILL is checker/admin for payroll/bill
+    // configuration - SYSTEM_ADMIN and FIN_ADMIN get no implicit authority here. PayrollMasterServiceImpl
+    // .updateSalaryHead/.updateStatutoryHead mutate live master data immediately in one step (no
+    // pending/draft state - see PayrollMasterServiceImpl.java) - there is no separate "prepare" action
+    // to give HR_MAKER_BILL here, so this single existing endpoint is gated as the checker/approval
+    // action (PAYROLL_MASTER_APPROVE), matching HR_ADMIN_BILL only; HR_MAKER_BILL is correctly denied.
+    // FOLLOW_UP_REQUIRED - PAYROLL_MASTER_MAKER_CHECKER: PAYROLL_MASTER_EDIT (HR_MAKER_BILL's prepare
+    // permission) is seeded but deliberately unwired to any endpoint - a genuine prepare-then-approve
+    // workflow would need a pending/draft persistence design this closure task does not invent.
     @PutMapping("/salary-heads/{headCount}")
-    @PreAuthorize("hasRole('HR_ADMIN')")
+    @PreAuthorize("@rbac.hasPermission(authentication, 'PAYROLL_MASTER_APPROVE')")
     public SalaryHeadResponse updateSalaryHead(@PathVariable Integer headCount, @Valid @RequestBody SalaryHeadUpdateRequest request) {
         return payrollMasterService.updateSalaryHead(headCount, request);
     }
@@ -132,7 +135,7 @@ public class PayrollMasterController {
     }
 
     @PutMapping("/statutory-heads/{statHeadCount}")
-    @PreAuthorize("hasRole('HR_ADMIN')")
+    @PreAuthorize("@rbac.hasPermission(authentication, 'PAYROLL_MASTER_APPROVE')")
     public StatutoryHeadResponse updateStatutoryHead(@PathVariable Integer statHeadCount,
                                                       @Valid @RequestBody StatutoryHeadUpdateRequest request) {
         return payrollMasterService.updateStatutoryHead(statHeadCount, request);
@@ -162,10 +165,12 @@ public class PayrollMasterController {
         return payrollStatutoryParameterService.listCurrent();
     }
 
-    // REQUIRES_BUSINESS_CONFIRMATION (same reasoning as updateSalaryHead/updateStatutoryHead above) -
-    // HR_ADMIN/FINANCE_ADMIN (the two roles already present) retained, SUPER_ADMIN removed.
+    // Same reasoning and permission as updateSalaryHead/updateStatutoryHead above -
+    // PayrollStatutoryParameterServiceImpl.revise() is also a single-step immediate mutation
+    // (closes out the current version's effectiveTo and inserts the revised row) with no separate
+    // prepare/approve persistence.
     @PostMapping("/statutory-parameters/{paramKey}/revise")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'FINANCE_ADMIN')")
+    @PreAuthorize("@rbac.hasPermission(authentication, 'PAYROLL_MASTER_APPROVE')")
     public StatutoryParameterResponse reviseStatutoryParameter(@PathVariable String paramKey,
                                                                 @Valid @RequestBody StatutoryParameterReviseRequest request) {
         return payrollStatutoryParameterService.revise(paramKey, request);
