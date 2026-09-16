@@ -19,6 +19,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
@@ -80,7 +81,7 @@ class MobilePunchServiceTest {
             return saved;
         });
 
-        MobilePunchResponse response = mobilePunchService.create(validRequest());
+        MobilePunchResponse response = mobilePunchService.create(validRequest(), EMPLOYEE_ID, false);
 
         assertThat(response.id()).isEqualTo(100L);
         assertThat(response.isWithinGeofence()).isTrue();
@@ -100,7 +101,7 @@ class MobilePunchServiceTest {
             return saved;
         });
 
-        MobilePunchResponse response = mobilePunchService.create(validRequest());
+        MobilePunchResponse response = mobilePunchService.create(validRequest(), EMPLOYEE_ID, false);
 
         assertThat(response.isWithinGeofence()).isFalse();
         assertThat(response.reviewStatus()).isEqualTo(ReviewStatus.FLAGGED_FOR_REVIEW);
@@ -111,7 +112,7 @@ class MobilePunchServiceTest {
     void create_whenEmployeeMissing_throwsEmployeeNotFoundException() {
         when(employeeRepository.findById(EMPLOYEE_ID)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> mobilePunchService.create(validRequest()))
+        assertThatThrownBy(() -> mobilePunchService.create(validRequest(), EMPLOYEE_ID, false))
                 .isInstanceOf(EmployeeNotFoundException.class);
     }
 
@@ -126,7 +127,7 @@ class MobilePunchServiceTest {
             return saved;
         });
 
-        MobilePunchResponse response = mobilePunchService.create(validRequest());
+        MobilePunchResponse response = mobilePunchService.create(validRequest(), EMPLOYEE_ID, false);
 
         assertThat(response).isNotNull();
         assertThat(response.id()).isEqualTo(102L);
@@ -139,7 +140,7 @@ class MobilePunchServiceTest {
                 .thenReturn(true);
         when(mobilePunchRepository.saveAndFlush(any(MobilePunch.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        mobilePunchService.create(validRequest()); // punchTime 2026-08-23T09:00:00Z = 2026-08-23T14:30 IST
+        mobilePunchService.create(validRequest(), EMPLOYEE_ID, false); // punchTime 2026-08-23T09:00:00Z = 2026-08-23T14:30 IST
 
         verify(attendanceAggregationService).evaluateDay(EMPLOYEE_ID, LocalDate.of(2026, 8, 23));
     }
@@ -157,9 +158,60 @@ class MobilePunchServiceTest {
         when(attendanceAggregationService.evaluateDay(any(), any()))
                 .thenThrow(new BusinessRuleViolationException("boom"));
 
-        MobilePunchResponse response = mobilePunchService.create(validRequest());
+        MobilePunchResponse response = mobilePunchService.create(validRequest(), EMPLOYEE_ID, false);
 
         assertThat(response.id()).isEqualTo(103L);
+    }
+
+    // ---- SEC-002: ownership enforcement (docs/security/SEC_001_002_REMEDIATION.md) ----
+
+    @Test
+    void create_withEmployeeIdOmitted_targetsTheCaller() {
+        MobilePunchRequest noEmployeeId = new MobilePunchRequest(null, Instant.parse("2026-08-23T09:00:00Z"), PunchType.IN,
+                new BigDecimal("28.6139"), new BigDecimal("77.2090"), new BigDecimal("5.0"), "device-123", null);
+        when(employeeRepository.findById(EMPLOYEE_ID)).thenReturn(Optional.of(employee));
+        when(geofenceService.isWithinGeofence(any(Employee.class), any(BigDecimal.class), any(BigDecimal.class)))
+                .thenReturn(true);
+        when(mobilePunchRepository.saveAndFlush(any(MobilePunch.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        MobilePunchResponse response = mobilePunchService.create(noEmployeeId, EMPLOYEE_ID, false);
+
+        assertThat(response.employeeId()).isEqualTo(EMPLOYEE_ID);
+    }
+
+    @Test
+    void create_withEmployeeIdOmitted_andNoCallerEmployeeId_throwsBusinessRuleViolationException() {
+        MobilePunchRequest noEmployeeId = new MobilePunchRequest(null, Instant.parse("2026-08-23T09:00:00Z"), PunchType.IN,
+                new BigDecimal("28.6139"), new BigDecimal("77.2090"), new BigDecimal("5.0"), "device-123", null);
+
+        assertThatThrownBy(() -> mobilePunchService.create(noEmployeeId, null, false))
+                .isInstanceOf(BusinessRuleViolationException.class);
+    }
+
+    @Test
+    void create_forAnotherEmployee_whenOnBehalfOfOthersNotPermitted_throwsAccessDeniedException() {
+        MobilePunchRequest forSomeoneElse = new MobilePunchRequest(99L, Instant.parse("2026-08-23T09:00:00Z"), PunchType.IN,
+                new BigDecimal("28.6139"), new BigDecimal("77.2090"), new BigDecimal("5.0"), "device-123", null);
+
+        assertThatThrownBy(() -> mobilePunchService.create(forSomeoneElse, EMPLOYEE_ID, false))
+                .isInstanceOf(AccessDeniedException.class);
+    }
+
+    @Test
+    void create_forAnotherEmployee_whenOnBehalfOfOthersPermitted_succeeds() {
+        Employee otherEmployee = new Employee("EMP-099", "Priya", "Nair", "priya.nair@example.com",
+                LocalDate.of(2024, 3, 1), employee.getDepartment(), employee.getDesignation());
+        ReflectionTestUtils.setField(otherEmployee, "id", 99L);
+        MobilePunchRequest forSomeoneElse = new MobilePunchRequest(99L, Instant.parse("2026-08-23T09:00:00Z"), PunchType.IN,
+                new BigDecimal("28.6139"), new BigDecimal("77.2090"), new BigDecimal("5.0"), "device-123", null);
+        when(employeeRepository.findById(99L)).thenReturn(Optional.of(otherEmployee));
+        when(geofenceService.isWithinGeofence(any(Employee.class), any(BigDecimal.class), any(BigDecimal.class)))
+                .thenReturn(true);
+        when(mobilePunchRepository.saveAndFlush(any(MobilePunch.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        MobilePunchResponse response = mobilePunchService.create(forSomeoneElse, EMPLOYEE_ID, true);
+
+        assertThat(response.employeeId()).isEqualTo(99L);
     }
 
     // ---- getMyHistory ----

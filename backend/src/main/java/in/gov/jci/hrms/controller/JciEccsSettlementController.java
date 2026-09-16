@@ -53,7 +53,11 @@ public class JciEccsSettlementController {
         return JciEccsSettlementResponse.from(noDuesService.calculate(employeeId, performedByEmployeeId));
     }
 
+    // SEC-010 (docs/security/RBAC_MIGRATION_REPORT.md): clearing JCIECCS no-dues is the financial
+    // settlement approval action - narrowed off the class-level SUPER_ADMIN grant, keeping only the two
+    // functional domain roles the class-level already lists.
     @PostMapping("/{employeeId}/clear")
+    @PreAuthorize("hasAnyRole('COOP_ADMIN', 'FINANCE_ADMIN')")
     public JciEccsSettlementResponse clear(@PathVariable Long employeeId, @Valid @RequestBody JciEccsClearNoDuesRequest request,
                                             Authentication authentication) {
         Long performedByEmployeeId = SecurityUtils.currentEmployeeId(authentication);

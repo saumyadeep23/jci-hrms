@@ -3,6 +3,7 @@ package in.gov.jci.hrms.security;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -36,11 +37,17 @@ public class SecurityConfig {
 
     private final String issuerUri;
     private final String localDevSecret;
+    private final String authMode;
+    private final Environment environment;
 
     public SecurityConfig(@Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri:}") String issuerUri,
-                           @Value("${security.jwt.local-dev-secret}") String localDevSecret) {
+                           @Value("${security.jwt.local-dev-secret}") String localDevSecret,
+                           @Value("${security.auth.mode:local-dev}") String authMode,
+                           Environment environment) {
         this.issuerUri = issuerUri;
         this.localDevSecret = localDevSecret;
+        this.authMode = authMode;
+        this.environment = environment;
     }
 
     @Bean
@@ -59,6 +66,11 @@ public class SecurityConfig {
                         // unauthenticated even if something upstream changes.
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/api/ping", "/actuator/health", "/actuator/health/**", "/actuator/info").permitAll()
+                        // ONBOARDING_IMPLEMENTATION.md: pre-auth activation endpoint - there is no
+                        // authenticated principal yet at this point in the onboarding flow by
+                        // design. Token validity/expiry/single-use is enforced entirely inside
+                        // UserOnboardingService.activate(), not by authentication.
+                        .requestMatchers(HttpMethod.POST, "/api/public/activation").permitAll()
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter())));
         return http.build();
@@ -110,16 +122,27 @@ public class SecurityConfig {
     }
 
     /**
-     * No IdP (Keycloak/Auth0/etc.) is provisioned for any environment yet, so
-     * issuer-uri is blank by default everywhere including prod-shaped configs.
-     * When blank, this falls back to a symmetric HS256 decoder keyed by
-     * security.jwt.local-dev-secret - fine for local development, CI, and this
-     * app's own test suite (which mints its own tokens), but explicitly NOT a
-     * production posture. Wire a real issuer-uri before any real deployment.
+     * SEC-001 fail-closed remediation (docs/security/SEC_001_002_REMEDIATION.md):
+     * which decoder gets built is now a positive, explicit choice
+     * (security.auth.mode=oidc|local-dev) rather than being inferred from
+     * issuer-uri being blank - and {@link AuthenticationModeGuard} refuses to
+     * let a production-like Spring profile (staging/prod - see
+     * AuthenticationModeGuard.PRODUCTION_LIKE_PROFILES) end up on local-dev
+     * HS256 auth or a missing/default configuration, throwing
+     * IllegalStateException to abort application startup instead. No IdP
+     * (Keycloak/Auth0/etc.) is provisioned for any environment yet, so
+     * security.auth.mode defaults to local-dev and issuer-uri defaults to
+     * blank - fine for local development, CI, and this app's own test suite
+     * (which mints its own tokens), but this guard is what stops that
+     * default from ever reaching a real deployment silently.
      */
     @Bean
     public JwtDecoder jwtDecoder() {
-        if (issuerUri != null && !issuerUri.isBlank()) {
+        JwtAuthMode mode = JwtAuthMode.parse(authMode);
+        boolean productionLike = AuthenticationModeGuard.isProductionLike(environment.getActiveProfiles());
+        AuthenticationModeGuard.validate(mode, productionLike, issuerUri, localDevSecret);
+
+        if (mode == JwtAuthMode.OIDC) {
             return JwtDecoders.fromIssuerLocation(issuerUri);
         }
         SecretKeySpec key = new SecretKeySpec(localDevSecret.getBytes(StandardCharsets.UTF_8), "HmacSHA256");

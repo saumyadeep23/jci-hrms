@@ -174,4 +174,26 @@ class PayrollRunControllerTest {
                         .content(objectMapper.writeValueAsString(new PayrollRunRequest(2026, 8))))
                 .andExpect(status().isForbidden());
     }
+
+    // SEC-010 (docs/security/RBAC_MIGRATION_REPORT.md): payroll finalization is a checker-only financial
+    // approval action - the legacy SUPER_ADMIN god-role must not be able to finalize a run, only
+    // FINANCE_ADMIN. create()/compute() still allow SUPER_ADMIN (class-level, unchanged - the maker side
+    // of this lifecycle) so this test isolates the one narrowed endpoint.
+    @Test
+    @WithMockUser(roles = "SUPER_ADMIN")
+    void finalizeRun_withOnlySuperAdminRole_returns403() throws Exception {
+        mockMvc.perform(post("/api/payroll/runs/1/finalize").param("finalizedBy", "super.admin"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @WithMockUser(roles = "SUPER_ADMIN")
+    void create_withSuperAdminRole_stillAllowed() throws Exception {
+        when(payrollRunService.create(any(PayrollRunRequest.class))).thenReturn(responseWithStatus(PayrollRunStatus.DRAFT));
+
+        mockMvc.perform(post("/api/payroll/runs")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new PayrollRunRequest(2026, 8))))
+                .andExpect(status().isCreated());
+    }
 }

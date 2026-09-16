@@ -99,6 +99,11 @@ class JciEccsConcurrencyHardeningTest {
     private PayrollBatch payrollBatch;
     private String payrollRunId;
     private Long loanId;
+    // Suffix for every per-scenario receipt/transaction/idempotency-key literal below (e.g. "TXN-RACE-D2-<seq>",
+    // "IDEMP-RACE-D2-<seq>") - a fixed literal collides forever against any leftover row a previous, incompletely
+    // torn-down run left behind (jcieccs_recovery.idempotency_key never expires and is checked before any balance
+    // effect is applied), permanently masking this scenario's own repayment/reversal from ever taking effect.
+    private int seq;
     private int cycleYear;
     private int cycleMonth;
     private LocalDate disbursementDate;
@@ -109,7 +114,7 @@ class JciEccsConcurrencyHardeningTest {
         // for employee/member codes - two test methods in the same run can share a cycleYear (different
         // cycleMonth keeps the payroll batch's own (month,year) constraint satisfied) but must never share
         // an employee/membership code.
-        int seq = CYCLE_SEQ.incrementAndGet();
+        seq = CYCLE_SEQ.incrementAndGet();
         cycleYear = 2200 + (seq / 12);
         cycleMonth = 1 + (seq % 12);
         disbursementDate = LocalDate.of(cycleYear, cycleMonth, 10);
@@ -140,11 +145,16 @@ class JciEccsConcurrencyHardeningTest {
     void tearDown() {
         // jcieccs_loan_repayment.recovery_allocation_id references jcieccs_recovery_allocation - the
         // ledger rows must go first, allocations second, or the allocation delete is FK-blocked.
+        // Each row's delete is individually try/caught (not the whole forEach) - a single row that fails to
+        // delete must never abort cleanup of its siblings, or it leaves a PERMANENT orphan (this member/loan
+        // combination is never revisited by any future test run's tearDown, since every run mints a fresh
+        // member/loan - see the 2026-09-15 jcieccs_recovery id=678 residue this exact gap once produced).
         attempt(() -> { if (member != null) recoveryRepository.findByMember_IdOrderByCreatedAtDesc(member.getId())
-                .forEach(r -> loanRepaymentRepository.findByRecovery_Id(r.getId()).forEach(loanRepaymentRepository::delete)); });
+                .forEach(r -> loanRepaymentRepository.findByRecovery_Id(r.getId()).forEach(rep -> attempt(() -> loanRepaymentRepository.delete(rep)))); });
         attempt(() -> { if (member != null) recoveryRepository.findByMember_IdOrderByCreatedAtDesc(member.getId())
-                .forEach(r -> allocationRepository.findByRecovery_IdOrderByAllocationSequenceAsc(r.getId()).forEach(allocationRepository::delete)); });
-        attempt(() -> { if (member != null) recoveryRepository.findByMember_IdOrderByCreatedAtDesc(member.getId()).forEach(recoveryRepository::delete); });
+                .forEach(r -> allocationRepository.findByRecovery_IdOrderByAllocationSequenceAsc(r.getId()).forEach(alloc -> attempt(() -> allocationRepository.delete(alloc)))); });
+        attempt(() -> { if (member != null) recoveryRepository.findByMember_IdOrderByCreatedAtDesc(member.getId())
+                .forEach(r -> attempt(() -> recoveryRepository.delete(r))); });
         attempt(() -> { if (member != null) deleteAllThriftForMember(member.getId()); });
         // Only this test's own single collection_detail row - never the batch, never any other member's
         // row (see this class's own javadoc above on why the batch is a shared, permanent fixture).
@@ -215,7 +225,7 @@ class JciEccsConcurrencyHardeningTest {
         try {
             Runnable call = () -> debitConfirmationService.confirmDebit(payrollRunId,
                     new JciEccsDebitConfirmationRequest(List.of(new JciEccsDebitConfirmationLineRequest(employee.getId(),
-                            JciEccsDebitStatus.DEBIT_SUCCESS, null, "TXN-RACE-A"))),
+                            JciEccsDebitStatus.DEBIT_SUCCESS, null, "TXN-RACE-A-" + seq))),
                     employee.getId());
 
             CompletableFuture<Object> first = raceCall(barrier, call, executor);
@@ -251,7 +261,7 @@ class JciEccsConcurrencyHardeningTest {
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
             JciEccsCashRepaymentRequest request = new JciEccsCashRepaymentRequest(new BigDecimal("30000"), BigDecimal.ZERO,
-                    disbursementDate.plusDays(20), "RCPT-RACE-B", "IDEMP-RACE-B");
+                    disbursementDate.plusDays(20), "RCPT-RACE-B-" + seq, "IDEMP-RACE-B-" + seq);
             Runnable call = () -> loanService.postCashRepayment(loanId, request, employee.getId());
 
             CompletableFuture<Object> first = raceCall(barrier, call, executor);
@@ -282,7 +292,7 @@ class JciEccsConcurrencyHardeningTest {
         try {
             // Pays off the entire 120000 principal in one shot via cash.
             JciEccsCashRepaymentRequest cashRequest = new JciEccsCashRepaymentRequest(new BigDecimal("120000"), new BigDecimal("1000.00"),
-                    disbursementDate.plusDays(10), "RCPT-RACE-C", "IDEMP-RACE-C");
+                    disbursementDate.plusDays(10), "RCPT-RACE-C-" + seq, "IDEMP-RACE-C-" + seq);
             // Wrapped in DeadlockRetryTemplate, exactly as JciEccsLoanController/JciEccsPayrollBatchController
             // wrap these same two calls in production - a genuine Postgres deadlock between two independent
             // lock-acquisition paths racing the same loan+collection_detail is an expected, retry-safe
@@ -290,7 +300,7 @@ class JciEccsConcurrencyHardeningTest {
             Runnable cashCall = () -> deadlockRetryTemplate.execute(() -> loanService.postCashRepayment(loanId, cashRequest, employee.getId()));
             Runnable payrollCall = () -> deadlockRetryTemplate.execute(() -> debitConfirmationService.confirmDebit(payrollRunId,
                     new JciEccsDebitConfirmationRequest(List.of(new JciEccsDebitConfirmationLineRequest(employee.getId(),
-                            JciEccsDebitStatus.DEBIT_SUCCESS, null, "TXN-RACE-C"))),
+                            JciEccsDebitStatus.DEBIT_SUCCESS, null, "TXN-RACE-C-" + seq))),
                     employee.getId()));
 
             CompletableFuture<Object> cash = raceCall(barrier, cashCall, executor);
@@ -342,7 +352,7 @@ class JciEccsConcurrencyHardeningTest {
     void scenarioD1_duplicateReversalOfTheSameRecovery_isAppliedExactlyOnce() throws Exception {
         debitConfirmationService.confirmDebit(payrollRunId,
                 new JciEccsDebitConfirmationRequest(List.of(new JciEccsDebitConfirmationLineRequest(employee.getId(),
-                        JciEccsDebitStatus.DEBIT_SUCCESS, null, "TXN-RACE-D1"))),
+                        JciEccsDebitStatus.DEBIT_SUCCESS, null, "TXN-RACE-D1-" + seq))),
                 employee.getId());
         JciEccsRecovery original = recoveryRepository.findByMember_IdOrderByCreatedAtDesc(member.getId()).get(0);
         assertThat(theLoan().getOutstandingPrincipal()).isEqualByComparingTo("110000.00");
@@ -350,7 +360,8 @@ class JciEccsConcurrencyHardeningTest {
         CyclicBarrier barrier = new CyclicBarrier(2);
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
-            Runnable call = () -> recoveryService.reverseRecovery(original.getId(), "Race reversal", employee.getId());
+            // SEC-004 (docs/security/SEC_001_002_REMEDIATION.md pattern): maker != checker.
+            Runnable call = () -> recoveryService.reverseRecovery(original.getId(), "Race reversal", employee.getId() + 1_000_000L);
             CompletableFuture<Object> first = raceCall(barrier, call, executor);
             CompletableFuture<Object> second = raceCall(barrier, call, executor);
 
@@ -387,7 +398,7 @@ class JciEccsConcurrencyHardeningTest {
     void scenarioD2_reversalRacesANewRepayment_neverLosesAnUpdate() throws Exception {
         debitConfirmationService.confirmDebit(payrollRunId,
                 new JciEccsDebitConfirmationRequest(List.of(new JciEccsDebitConfirmationLineRequest(employee.getId(),
-                        JciEccsDebitStatus.DEBIT_SUCCESS, null, "TXN-RACE-D2"))),
+                        JciEccsDebitStatus.DEBIT_SUCCESS, null, "TXN-RACE-D2-" + seq))),
                 employee.getId());
         JciEccsRecovery original = recoveryRepository.findByMember_IdOrderByCreatedAtDesc(member.getId()).get(0);
         assertThat(theLoan().getOutstandingPrincipal()).isEqualByComparingTo("110000.00");
@@ -395,9 +406,10 @@ class JciEccsConcurrencyHardeningTest {
         CyclicBarrier barrier = new CyclicBarrier(2);
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
-            Runnable reversalCall = () -> recoveryService.reverseRecovery(original.getId(), "Race vs new cash", employee.getId());
+            // SEC-004 (docs/security/SEC_001_002_REMEDIATION.md pattern): maker != checker.
+            Runnable reversalCall = () -> recoveryService.reverseRecovery(original.getId(), "Race vs new cash", employee.getId() + 1_000_000L);
             JciEccsCashRepaymentRequest cashRequest = new JciEccsCashRepaymentRequest(new BigDecimal("5000"), BigDecimal.ZERO,
-                    disbursementDate.plusDays(12), "RCPT-RACE-D2", "IDEMP-RACE-D2");
+                    disbursementDate.plusDays(12), "RCPT-RACE-D2-" + seq, "IDEMP-RACE-D2-" + seq);
             Runnable cashCall = () -> loanService.postCashRepayment(loanId, cashRequest, employee.getId());
 
             CompletableFuture<Object> reversal = raceCall(barrier, reversalCall, executor);

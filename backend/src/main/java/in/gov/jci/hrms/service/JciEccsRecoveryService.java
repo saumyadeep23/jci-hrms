@@ -17,6 +17,7 @@ import in.gov.jci.hrms.repository.JciEccsLoanScheduleRepository;
 import in.gov.jci.hrms.repository.JciEccsMemberRepository;
 import in.gov.jci.hrms.repository.JciEccsRecoveryAllocationRepository;
 import in.gov.jci.hrms.repository.JciEccsRecoveryRepository;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -260,6 +261,13 @@ public class JciEccsRecoveryService {
         if (original.getStatus() != JciEccsRecoveryStatus.POSTED && original.getStatus() != JciEccsRecoveryStatus.PARTIAL) {
             throw new BusinessRuleViolationException(
                     "Recovery " + recoveryId + " must be POSTED or PARTIAL to reverse but is " + original.getStatus());
+        }
+        // SEC-004 maker != checker (docs/security/MAKER_CHECKER_IMPLEMENTATION.md): the officer who
+        // created this recovery (createdBy) may not be the one who reverses it. Recoveries with no
+        // recorded createdBy (pre-existing rows) are not retroactively blocked.
+        if (original.getCreatedBy() != null && original.getCreatedBy().equals(performedByEmployeeId)) {
+            throw new AccessDeniedException(
+                    "Recovery " + recoveryId + ": reversal cannot be performed by the same employee who created it");
         }
 
         String idempotencyKey = "REVERSAL:" + recoveryId;

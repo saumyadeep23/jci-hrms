@@ -66,7 +66,7 @@ public class CpfWithdrawalRuleController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyRole('CPF_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('CPF_ADMIN')")
     public ResponseEntity<CpfWithdrawalRuleVersionResponse> createDraft(@Valid @RequestBody CpfWithdrawalRuleVersionRequest request,
                                                                           Authentication authentication) {
         String createdBy = SecurityUtils.currentUsername(authentication);
@@ -75,26 +75,26 @@ public class CpfWithdrawalRuleController {
     }
 
     @PostMapping("/{versionId}/submit")
-    @PreAuthorize("hasAnyRole('CPF_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('CPF_ADMIN')")
     public CpfWithdrawalRuleVersionResponse submit(@PathVariable UUID versionId, Authentication authentication) {
         return ruleService.submitForVerification(versionId, actor(authentication));
     }
 
     @PostMapping("/{versionId}/verify")
-    @PreAuthorize("hasAnyRole('CPF_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('CPF_ADMIN')")
     public CpfWithdrawalRuleVersionResponse verify(@PathVariable UUID versionId, Authentication authentication) {
         return ruleService.verify(versionId, actor(authentication));
     }
 
     @PostMapping("/{versionId}/approve")
-    @PreAuthorize("hasAnyRole('CPF_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('CPF_ADMIN')")
     public CpfWithdrawalRuleVersionResponse approve(@PathVariable UUID versionId, @RequestParam(required = false) String approvalReference,
                                                      @Valid @RequestBody RejectRemarksRequest request, Authentication authentication) {
         return ruleService.approve(versionId, actor(authentication), approvalReference, request.remarks());
     }
 
     @PostMapping("/{versionId}/reject")
-    @PreAuthorize("hasAnyRole('CPF_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('CPF_ADMIN')")
     public CpfWithdrawalRuleVersionResponse reject(@PathVariable UUID versionId, @Valid @RequestBody RejectRemarksRequest request,
                                                     Authentication authentication) {
         return ruleService.reject(versionId, actor(authentication), request.remarks());

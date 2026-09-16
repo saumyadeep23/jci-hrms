@@ -85,8 +85,13 @@ public class LeaveApplicationService {
         this.leaveApplicationActionRepository = leaveApplicationActionRepository;
     }
 
+    /** SEC-007 remediation (docs/security/SEC_001_002_REMEDIATION.md pattern). */
     @Transactional
-    public LeaveApplicationResponse create(LeaveApplicationRequest request) {
+    public LeaveApplicationResponse create(LeaveApplicationRequest request, Long callerEmployeeId, boolean onBehalfOfOthersPermitted) {
+        if (!onBehalfOfOthersPermitted && !request.employeeId().equals(callerEmployeeId)) {
+            throw new org.springframework.security.access.AccessDeniedException(
+                    "Not authorized to create a leave application for employee " + request.employeeId() + " on behalf of another employee");
+        }
         Employee employee = resolveEmployee(request.employeeId());
         LeaveType leaveType = resolveLeaveType(request.leaveTypeId());
         LeaveSession session = resolveSession(request.leaveSession());

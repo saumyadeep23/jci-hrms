@@ -6,6 +6,7 @@ import in.gov.jci.hrms.dto.RegularizationDecisionRequest;
 import in.gov.jci.hrms.entity.ApprovalStatus;
 import in.gov.jci.hrms.exception.BusinessRuleViolationException;
 import in.gov.jci.hrms.repository.AttendanceRegularizationApplicationRepository;
+import in.gov.jci.hrms.security.AttendanceAggregationSecurity;
 import in.gov.jci.hrms.security.SecurityUtils;
 import in.gov.jci.hrms.service.AttendanceRegularizationService;
 import jakarta.validation.Valid;
@@ -30,17 +31,25 @@ public class AttendanceRegularizationController {
 
     private final AttendanceRegularizationService attendanceRegularizationService;
     private final AttendanceRegularizationApplicationRepository regularizationRepository;
+    private final AttendanceAggregationSecurity attendanceAggSec;
 
     public AttendanceRegularizationController(AttendanceRegularizationService attendanceRegularizationService,
-                                                AttendanceRegularizationApplicationRepository regularizationRepository) {
+                                                AttendanceRegularizationApplicationRepository regularizationRepository,
+                                                AttendanceAggregationSecurity attendanceAggSec) {
         this.attendanceRegularizationService = attendanceRegularizationService;
         this.regularizationRepository = regularizationRepository;
+        this.attendanceAggSec = attendanceAggSec;
     }
 
+    /** SEC-005 remediation (docs/security/SEC_001_002_REMEDIATION.md pattern): reuses @attendanceAggSec exactly like MobilePunchController's SEC-002 fix, rather than inventing a second ownership mechanism. */
     @PostMapping
-    @PreAuthorize("hasAnyRole('EMPLOYEE', 'HR_ADMIN', 'SUPER_ADMIN')")
-    public ResponseEntity<AttendanceRegularizationResponse> submit(@Valid @RequestBody AttendanceRegularizationRequest request) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(attendanceRegularizationService.submit(request));
+    @PreAuthorize("@attendanceAggSec.canEvaluateFor(authentication, #request.employeeId())")
+    public ResponseEntity<AttendanceRegularizationResponse> submit(@Valid @RequestBody AttendanceRegularizationRequest request,
+                                                                     Authentication authentication) {
+        Long callerEmployeeId = SecurityUtils.currentEmployeeId(authentication);
+        boolean onBehalfOfOthersPermitted = attendanceAggSec.canActOnBehalfOfOthers(authentication);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(attendanceRegularizationService.submit(request, callerEmployeeId, onBehalfOfOthersPermitted));
     }
 
     /**

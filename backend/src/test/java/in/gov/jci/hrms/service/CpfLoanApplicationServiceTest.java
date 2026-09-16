@@ -18,6 +18,7 @@ import in.gov.jci.hrms.entity.PayrollBatchStatus;
 import in.gov.jci.hrms.entity.PayrollMonthlyHeadItem;
 import in.gov.jci.hrms.entity.PayrollMonthlyRecord;
 import in.gov.jci.hrms.exception.BusinessRuleViolationException;
+import in.gov.jci.hrms.repository.CpfLoanApplicationRepository;
 import in.gov.jci.hrms.repository.CpfStatutoryInterestRateRepository;
 import in.gov.jci.hrms.repository.CpfTrustMemberLedgerEntryRepository;
 import in.gov.jci.hrms.repository.DepartmentRepository;
@@ -61,6 +62,7 @@ class CpfLoanApplicationServiceTest {
     @Autowired private PayrollMonthlyRecordRepository payrollMonthlyRecordRepository;
     @Autowired private PayrollMonthlyHeadItemRepository headItemRepository;
     @Autowired private CpfStatutoryInterestRateRepository rateRepository;
+    @Autowired private CpfLoanApplicationRepository cpfLoanApplicationRepository;
 
     private Employee employee;
 
@@ -161,6 +163,73 @@ class CpfLoanApplicationServiceTest {
         assertThat(disbursed.disbursedAt()).isNotNull();
     }
 
+    // ---- SEC-003 maker != checker (docs/security/MAKER_CHECKER_IMPLEMENTATION.md) ----
+
+    @Test
+    void sanctionLoan_bySameOfficerWhoApplied_throwsAccessDenied() {
+        seedBalance(new BigDecimal("20000.00"), BigDecimal.ZERO);
+        Long applicantId = 5001L;
+        CpfLoanApplicationResponse applied = cpfLoanApplicationService.applyLoan(
+                applicationRequest(CpfLoanType.REFUNDABLE_LOAN, new BigDecimal("6000.00")), applicantId);
+
+        assertThatThrownBy(() -> cpfLoanApplicationService.sanctionLoan(applied.id(),
+                new CpfLoanSanctionRequest(new BigDecimal("5000.00"), "SANC/SEC003/001", SANCTION_DATE, 5, 5, null, null, null), applicantId))
+                .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+
+        assertThat(cpfLoanApplicationService.findByEmployee(employee.getId()).get(0).status()).isEqualTo(CpfLoanApplicationStatus.APPLIED);
+    }
+
+    @Test
+    void sanctionLoan_byDifferentOfficer_succeeds() {
+        seedBalance(new BigDecimal("20000.00"), BigDecimal.ZERO);
+        Long applicantId = 5001L;
+        Long sanctioningOfficerId = 5002L;
+        CpfLoanApplicationResponse applied = cpfLoanApplicationService.applyLoan(
+                applicationRequest(CpfLoanType.REFUNDABLE_LOAN, new BigDecimal("6000.00")), applicantId);
+
+        CpfLoanApplicationResponse sanctioned = cpfLoanApplicationService.sanctionLoan(applied.id(),
+                new CpfLoanSanctionRequest(new BigDecimal("5000.00"), "SANC/SEC003/002", SANCTION_DATE, 5, 5, null, null, null), sanctioningOfficerId);
+
+        assertThat(sanctioned.status()).isEqualTo(CpfLoanApplicationStatus.SANCTIONED);
+    }
+
+    @Test
+    void disburseLoan_bySameOfficerWhoApplied_throwsAccessDenied() {
+        seedBalance(new BigDecimal("20000.00"), BigDecimal.ZERO);
+        Long applicantId = 5003L;
+        CpfLoanApplicationResponse applied = cpfLoanApplicationService.applyLoan(
+                applicationRequest(CpfLoanType.REFUNDABLE_LOAN, new BigDecimal("6000.00")), applicantId);
+        cpfLoanApplicationService.sanctionLoan(applied.id(),
+                new CpfLoanSanctionRequest(new BigDecimal("5000.00"), "SANC/SEC003/003", SANCTION_DATE, 5, 5, null, null, null), 5004L);
+
+        assertThatThrownBy(() -> cpfLoanApplicationService.disburseLoan(applied.id(), applicantId))
+                .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+    }
+
+    /** SEC-008: actor attribution is persisted on the entity, not merely passed through and discarded. */
+    @Test
+    void applyLoan_persistsApplicantEmployeeId() {
+        seedBalance(new BigDecimal("20000.00"), BigDecimal.ZERO);
+        CpfLoanApplicationResponse applied = cpfLoanApplicationService.applyLoan(
+                applicationRequest(CpfLoanType.REFUNDABLE_LOAN, new BigDecimal("6000.00")), 5005L);
+
+        var persisted = cpfLoanApplicationRepository.findById(applied.id()).orElseThrow();
+        assertThat(persisted.getApplicantEmployeeId()).isEqualTo(5005L);
+    }
+
+    @Test
+    void sanctionLoan_persistsSanctionedByEmployeeId() {
+        seedBalance(new BigDecimal("20000.00"), BigDecimal.ZERO);
+        CpfLoanApplicationResponse applied = cpfLoanApplicationService.applyLoan(
+                applicationRequest(CpfLoanType.REFUNDABLE_LOAN, new BigDecimal("6000.00")), 5006L);
+
+        cpfLoanApplicationService.sanctionLoan(applied.id(),
+                new CpfLoanSanctionRequest(new BigDecimal("5000.00"), "SANC/SEC008/001", SANCTION_DATE, 5, 5, null, null, null), 5007L);
+
+        var persisted = cpfLoanApplicationRepository.findById(applied.id()).orElseThrow();
+        assertThat(persisted.getSanctionedByEmployeeId()).isEqualTo(5007L);
+    }
+
     @Test
     void disburseLoan_refundableLoan_debitsEeFirstThenSpillsIntoVpf_andWritesRunningBalances() {
         // Only 3000 in EE, 5000 in VPF - a 5000 disbursement must debit all of EE (3000) then the
@@ -237,9 +306,14 @@ class CpfLoanApplicationServiceTest {
                 new CpfLoanSanctionRequest(new BigDecimal("1000.00"), "SANC/CLOSE/001", SANCTION_DATE, 1, 1, null, null, null), null);
         cpfLoanApplicationService.disburseLoan(applied.id(), null);
 
-        PayrollBatch batch = payrollBatchRepository.save(new PayrollBatch("BATCH-CPFLOAN-1", 7, 2026, "2026-2027"));
+        // Far-future year (matching this file's own SANCTION_DATE convention above), not the wall-clock-
+        // adjacent 2026 this line previously hardcoded - payroll_batches enforces UNIQUE(sal_month,
+        // sal_year) globally, and a real, manually-created batch for July 2026 already exists on the
+        // shared local dev Postgres instance (created via the live PayrollBatchService, unrelated to any
+        // test), so any test hardcoding a near-current-date period risks colliding with it.
+        PayrollBatch batch = payrollBatchRepository.save(new PayrollBatch("BATCH-CPFLOAN-1", 7, 2050, "2050-2051"));
         PayrollMonthlyRecord record = payrollMonthlyRecordRepository.save(new PayrollMonthlyRecord(batch, employee,
-                employee.getEmployeeCode(), 7, 2026, "01", "MGR", "X", "IDA", 31));
+                employee.getEmployeeCode(), 7, 2050, "01", "MGR", "X", "IDA", 31));
         headItemRepository.save(new PayrollMonthlyHeadItem(record, 30, new BigDecimal("1000.00"))); // CPFLOAN_PRIN, full payoff
         batch.setStatus(PayrollBatchStatus.HR_FINALIZED);
 

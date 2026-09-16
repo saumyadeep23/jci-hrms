@@ -5,6 +5,7 @@ import in.gov.jci.hrms.dto.LeaveEncashmentHistoryResponse;
 import in.gov.jci.hrms.dto.LeaveEncashmentRequest;
 import in.gov.jci.hrms.dto.LeaveEncashmentResponse;
 import in.gov.jci.hrms.exception.BusinessRuleViolationException;
+import in.gov.jci.hrms.security.AttendanceAggregationSecurity;
 import in.gov.jci.hrms.security.SecurityUtils;
 import in.gov.jci.hrms.service.LeaveEncashmentService;
 import jakarta.validation.Valid;
@@ -29,15 +30,21 @@ import java.util.List;
 public class LeaveEncashmentController {
 
     private final LeaveEncashmentService leaveEncashmentService;
+    private final AttendanceAggregationSecurity attendanceAggSec;
 
-    public LeaveEncashmentController(LeaveEncashmentService leaveEncashmentService) {
+    public LeaveEncashmentController(LeaveEncashmentService leaveEncashmentService, AttendanceAggregationSecurity attendanceAggSec) {
         this.leaveEncashmentService = leaveEncashmentService;
+        this.attendanceAggSec = attendanceAggSec;
     }
 
+    /** SEC-006 remediation (docs/security/SEC_001_002_REMEDIATION.md pattern). */
     @PostMapping("/api/v1/self-service/leave/encashment")
-    @PreAuthorize("hasAnyRole('EMPLOYEE', 'HR_ADMIN', 'SUPER_ADMIN')")
-    public ResponseEntity<LeaveEncashmentResponse> apply(@Valid @RequestBody LeaveEncashmentRequest request) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(leaveEncashmentService.apply(request));
+    @PreAuthorize("@attendanceAggSec.canEvaluateFor(authentication, #request.employeeId())")
+    public ResponseEntity<LeaveEncashmentResponse> apply(@Valid @RequestBody LeaveEncashmentRequest request, Authentication authentication) {
+        Long callerEmployeeId = SecurityUtils.currentEmployeeId(authentication);
+        boolean onBehalfOfOthersPermitted = attendanceAggSec.canActOnBehalfOfOthers(authentication);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(leaveEncashmentService.apply(request, callerEmployeeId, onBehalfOfOthersPermitted));
     }
 
     @GetMapping("/api/v1/self-service/leave/encashment/mine")

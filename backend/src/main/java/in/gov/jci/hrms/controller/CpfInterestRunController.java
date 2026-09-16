@@ -68,7 +68,7 @@ public class CpfInterestRunController {
     }
 
     @PostMapping("/calculate")
-    @PreAuthorize("hasAnyRole('CPF_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('CPF_ADMIN')")
     public ResponseEntity<CpfInterestCalculationPreviewResponse> calculate(@Valid @RequestBody CpfInterestCalculateRequest request,
                                                                             Authentication authentication) {
         Long officerId = SecurityUtils.currentEmployeeId(authentication);
@@ -77,7 +77,7 @@ public class CpfInterestRunController {
     }
 
     @PostMapping("/{runId}/post")
-    @PreAuthorize("hasAnyRole('CPF_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('CPF_ADMIN')")
     public CpfAnnualInterestRunResponse post(@PathVariable Long runId, @Valid @RequestBody CpfInterestPostRequest request,
                                               Authentication authentication) {
         Long officerId = SecurityUtils.currentEmployeeId(authentication);
@@ -85,7 +85,7 @@ public class CpfInterestRunController {
     }
 
     @PostMapping("/{runId}/reverse")
-    @PreAuthorize("hasAnyRole('CPF_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('CPF_ADMIN')")
     public CpfAnnualInterestRunResponse reverse(@PathVariable Long runId, @Valid @RequestBody CpfInterestReverseRequest request,
                                                  Authentication authentication) {
         Long officerId = SecurityUtils.currentEmployeeId(authentication);

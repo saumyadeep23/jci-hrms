@@ -60,7 +60,7 @@ public class CpfApplicationController {
 
     /** Task 4 Part 20: widened to EMPLOYEE for self-service - an employee may only apply for themselves
      * (@cpfApplicationSec.isSelf against the request body's own employeeCode, not a path/query param).
-     * Sanction/disburse/reject remain CPF_ADMIN/SUPER_ADMIN-only, untouched - "may not approve own
+     * Sanction/disburse/reject remain CPF_ADMIN-only, untouched - "may not approve own
      * application" stays enforced by simply never granting EMPLOYEE those three endpoints. */
     @PostMapping
     @PreAuthorize("hasAnyRole('CPF_ADMIN', 'SUPER_ADMIN') or (hasRole('EMPLOYEE') and @cpfApplicationSec.isSelf(authentication, #request.employeeCode()))")
@@ -72,20 +72,24 @@ public class CpfApplicationController {
                 .body(created);
     }
 
+    // SEC-010 (docs/security/RBAC_MIGRATION_REPORT.md): sanction/disburse/reject are financial
+    // checker-only approval actions - SUPER_ADMIN (the legacy JWT god-role) is deliberately NOT granted
+    // here, only CPF_ADMIN, so the legacy authorization model cannot bypass the same maker!=checker
+    // boundary SEC-003 enforces at the service layer for these three transitions.
     @PutMapping("/{id}/sanction")
-    @PreAuthorize("hasAnyRole('CPF_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('CPF_ADMIN')")
     public CpfApplicationResponse sanction(@PathVariable UUID id, @Valid @RequestBody CpfApplicationSanctionRequest request) {
         return applicationService.sanction(id, request);
     }
 
     @PutMapping("/{id}/disburse")
-    @PreAuthorize("hasAnyRole('CPF_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('CPF_ADMIN')")
     public CpfApplicationResponse disburse(@PathVariable UUID id) {
         return applicationService.disburse(id);
     }
 
     @PutMapping("/{id}/reject")
-    @PreAuthorize("hasAnyRole('CPF_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('CPF_ADMIN')")
     public CpfApplicationResponse reject(@PathVariable UUID id) {
         return applicationService.reject(id);
     }

@@ -11,6 +11,7 @@ import in.gov.jci.hrms.exception.EmployeeNotFoundException;
 import in.gov.jci.hrms.exception.InsufficientLeaveBalanceException;
 import in.gov.jci.hrms.exception.MasterDataNotFoundException;
 import in.gov.jci.hrms.repository.LeaveApplicationRepository;
+import in.gov.jci.hrms.security.AttendanceAggregationSecurity;
 import in.gov.jci.hrms.security.LeaveApplicationSecurity;
 import in.gov.jci.hrms.security.SecurityConfig;
 import in.gov.jci.hrms.service.LeaveApplicationService;
@@ -31,6 +32,8 @@ import java.time.LocalDate;
 import java.util.Optional;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -40,7 +43,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(LeaveApplicationController.class)
-@Import({SecurityConfig.class, LeaveApplicationSecurity.class})
+@Import({SecurityConfig.class, LeaveApplicationSecurity.class, AttendanceAggregationSecurity.class})
 @WithMockUser(roles = "HR_ADMIN")
 class LeaveApplicationControllerTest {
 
@@ -72,7 +75,7 @@ class LeaveApplicationControllerTest {
     @Test
     void create_withValidRequest_returns201WithDraftStatus() throws Exception {
         LeaveApplicationRequest request = validRequest();
-        when(leaveApplicationService.create(any(LeaveApplicationRequest.class)))
+        when(leaveApplicationService.create(any(LeaveApplicationRequest.class), any(), anyBoolean()))
                 .thenReturn(responseWithStatus(LeaveApplicationStatus.DRAFT));
 
         mockMvc.perform(post("/api/leave-applications")
@@ -96,7 +99,7 @@ class LeaveApplicationControllerTest {
     @Test
     void create_whenEmployeeMissing_returns404() throws Exception {
         LeaveApplicationRequest request = validRequest();
-        when(leaveApplicationService.create(any(LeaveApplicationRequest.class)))
+        when(leaveApplicationService.create(any(LeaveApplicationRequest.class), any(), anyBoolean()))
                 .thenThrow(new EmployeeNotFoundException(1L));
 
         mockMvc.perform(post("/api/leave-applications")
@@ -108,7 +111,7 @@ class LeaveApplicationControllerTest {
     @Test
     void create_whenLeaveTypeMissing_returns404() throws Exception {
         LeaveApplicationRequest request = validRequest();
-        when(leaveApplicationService.create(any(LeaveApplicationRequest.class)))
+        when(leaveApplicationService.create(any(LeaveApplicationRequest.class), any(), anyBoolean()))
                 .thenThrow(new MasterDataNotFoundException("Leave Type", 2L));
 
         mockMvc.perform(post("/api/leave-applications")
@@ -332,5 +335,35 @@ class LeaveApplicationControllerTest {
                         .with(jwt().jwt(builder -> builder.claim("employee_id", "10"))
                                 .authorities(new SimpleGrantedAuthority("ROLE_EMPLOYEE"))))
                 .andExpect(status().isForbidden());
+    }
+
+    // ---- SEC-007 (docs/security/SEC_001_002_REMEDIATION.md pattern) ----
+
+    @Test
+    void create_asOrdinaryEmployeeForAnotherEmployeeId_returns403_andServiceIsNeverInvoked() throws Exception {
+        LeaveApplicationRequest forSomeoneElse = validRequest(); // employeeId = 1L, caller is employee 2
+
+        mockMvc.perform(post("/api/leave-applications")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(forSomeoneElse))
+                        .with(jwt().jwt(builder -> builder.claim("employee_id", "2"))
+                                .authorities(new SimpleGrantedAuthority("ROLE_EMPLOYEE"))))
+                .andExpect(status().isForbidden());
+
+        verifyNoInteractions(leaveApplicationService);
+    }
+
+    @Test
+    void create_asEmployeePunchingOwnEmployeeId_returns201() throws Exception {
+        LeaveApplicationRequest ownRequest = validRequest(); // employeeId = 1L
+        when(leaveApplicationService.create(any(LeaveApplicationRequest.class), any(), anyBoolean()))
+                .thenReturn(responseWithStatus(LeaveApplicationStatus.DRAFT));
+
+        mockMvc.perform(post("/api/leave-applications")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(ownRequest))
+                        .with(jwt().jwt(builder -> builder.claim("employee_id", "1"))
+                                .authorities(new SimpleGrantedAuthority("ROLE_EMPLOYEE"))))
+                .andExpect(status().isCreated());
     }
 }

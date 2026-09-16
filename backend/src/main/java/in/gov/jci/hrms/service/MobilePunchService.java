@@ -17,6 +17,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -76,10 +77,30 @@ public class MobilePunchService {
         this.clock = clock;
     }
 
+    /**
+     * SEC-002 remediation (docs/security/SEC_001_002_REMEDIATION.md):
+     * callerEmployeeId/onBehalfOfOthersPermitted are the authoritative
+     * identity and authorization decision the controller already resolved
+     * from the JWT/role check - this method re-derives and re-checks
+     * ownership from them itself (rather than trusting request.employeeId()
+     * as-is) so a future caller of this method through some other API path
+     * can't silently record attendance for an employee the caller isn't
+     * entitled to act for.
+     */
     @Transactional
-    public MobilePunchResponse create(MobilePunchRequest request) {
-        Employee employee = employeeRepository.findById(request.employeeId())
-                .orElseThrow(() -> new EmployeeNotFoundException(request.employeeId()));
+    public MobilePunchResponse create(MobilePunchRequest request, Long callerEmployeeId, boolean onBehalfOfOthersPermitted) {
+        Long targetEmployeeId = request.employeeId() != null ? request.employeeId() : callerEmployeeId;
+        if (targetEmployeeId == null) {
+            throw new BusinessRuleViolationException(
+                    "employeeId was not supplied and could not be resolved from the caller's identity");
+        }
+        if (!onBehalfOfOthersPermitted && !targetEmployeeId.equals(callerEmployeeId)) {
+            throw new AccessDeniedException(
+                    "Not authorized to record attendance for employee " + targetEmployeeId + " on behalf of another employee");
+        }
+
+        Employee employee = employeeRepository.findById(targetEmployeeId)
+                .orElseThrow(() -> new EmployeeNotFoundException(targetEmployeeId));
 
         boolean withinGeofence = geofenceService.isWithinGeofence(employee, request.latitude(), request.longitude());
         ReviewStatus reviewStatus = withinGeofence ? ReviewStatus.VALID : ReviewStatus.FLAGGED_FOR_REVIEW;

@@ -11,6 +11,14 @@ locals {
   # keys, WAF); dev stays on the cheaper defaults called out in the README.
   hardened = contains(["staging", "prod"], var.environment)
   is_prod  = var.environment == "prod"
+
+  # SEC-001 (docs/security/SEC_001_002_REMEDIATION.md): the backend's
+  # AuthenticationModeGuard refuses to start on a production-like Spring
+  # profile (SPRING_PROFILES_ACTIVE, set below from var.environment) unless
+  # JWT_AUTH_MODE=oidc AND JWT_ISSUER_URI is set - selecting "oidc" here for
+  # staging/prod means a deploy without a real jwt_issuer_uri fails closed at
+  # container startup instead of silently accepting local-dev HS256 auth.
+  jwt_auth_mode = local.hardened ? "oidc" : "local-dev"
 }
 
 resource "aws_vpc" "main" {
@@ -367,7 +375,15 @@ resource "aws_ecs_task_definition" "backend" {
     }]
     environment = [
       { name = "SPRING_DATASOURCE_URL", value = "jdbc:postgresql://${aws_db_instance.main.endpoint}/${var.db_name}" },
-      { name = "SPRING_DATASOURCE_USERNAME", value = var.db_username }
+      { name = "SPRING_DATASOURCE_USERNAME", value = var.db_username },
+      # SEC-001 fail-closed guard (docs/security/SEC_001_002_REMEDIATION.md):
+      # SPRING_PROFILES_ACTIVE mirrors var.environment so SecurityConfig can
+      # tell a production-like deploy from dev; JWT_AUTH_MODE/JWT_ISSUER_URI
+      # must both be set correctly together for staging/prod or the backend
+      # refuses to start rather than falling back to local-dev JWT auth.
+      { name = "SPRING_PROFILES_ACTIVE", value = var.environment },
+      { name = "JWT_AUTH_MODE", value = local.jwt_auth_mode },
+      { name = "JWT_ISSUER_URI", value = var.jwt_issuer_uri }
     ]
     secrets = [
       { name = "SPRING_DATASOURCE_PASSWORD", valueFrom = aws_secretsmanager_secret.db_password.arn }

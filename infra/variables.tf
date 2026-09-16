@@ -81,3 +81,9 @@ variable "acm_certificate_arn" {
   type        = string
   default     = ""
 }
+
+variable "jwt_issuer_uri" {
+  description = "OIDC issuer URI for JWT validation (SecurityConfig.jwtDecoder(), backend/src/main/java/in/gov/jci/hrms/security/). Required whenever environment is staging/prod - SEC-001's fail-closed guard (docs/security/SEC_001_002_REMEDIATION.md) refuses to start the backend if it's blank in those environments, rather than falling back to local-dev JWT auth. Leave empty for dev, where local-dev JWT auth remains permitted. No IdP is provisioned yet for any environment, so this has no real value to set until one exists."
+  type        = string
+  default     = ""
+}

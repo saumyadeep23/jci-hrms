@@ -52,7 +52,11 @@ public class PayrollRunController {
         return payrollRunService.compute(id);
     }
 
+    // SEC-010 (docs/security/RBAC_MIGRATION_REPORT.md): payroll finalization is a checker-only financial
+    // approval action - narrowed off the class-level SUPER_ADMIN grant so the legacy god-role cannot
+    // finalize a payroll run; only FINANCE_ADMIN (the class-level's other, functional role) can.
     @PostMapping("/{id}/finalize")
+    @PreAuthorize("hasRole('FINANCE_ADMIN')")
     public PayrollRunResponse finalizeRun(@PathVariable Long id, @RequestParam String finalizedBy) {
         return payrollRunService.finalizeRun(id, finalizedBy);
     }

@@ -229,7 +229,14 @@ class JciEccsRecoveryServiceTest {
         JciEccsRecovery original = latestRecovery();
         assertThat(theLoan().getOutstandingPrincipal()).isEqualByComparingTo("110000.00");
 
-        JciEccsRecovery reversal = recoveryService.reverseRecovery(original.getId(), "Payroll debit reversed by employer", employee.getId());
+        // SEC-004 (docs/security/SEC_001_002_REMEDIATION.md pattern): maker != checker - the
+        // reversal must be performed by a different employee than the one who created the
+        // recovery being reversed (original.getCreatedBy() == employee.getId() here, via
+        // confirmDebit() above). reverseRecovery() only compares this id against
+        // original.getCreatedBy() - it never looks up an Employee row for it - so a distinct
+        // literal id is sufficient here and avoids this test class's cpf_ac_no auto-generation.
+        Long reversingOfficerId = employee.getId() + 1_000_000L;
+        JciEccsRecovery reversal = recoveryService.reverseRecovery(original.getId(), "Payroll debit reversed by employer", reversingOfficerId);
 
         assertThat(reversal.getSource()).isEqualTo(JciEccsRecoverySource.REVERSAL);
         assertThat(reversal.getStatus()).isEqualTo(JciEccsRecoveryStatus.POSTED);

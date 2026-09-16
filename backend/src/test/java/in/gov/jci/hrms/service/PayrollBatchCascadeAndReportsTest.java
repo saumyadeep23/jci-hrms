@@ -96,17 +96,24 @@ class PayrollBatchCascadeAndReportsTest {
 
         regularPayFixationRepository.save(new RegularPayFixation(employee, gradeScale, new BigDecimal("50000.00"), LocalDate.of(2018, 4, 1)));
         // Distinctive effective_from dates (not the usual 1-April revision date) to avoid colliding with
-        // real seeded DA/HRA rate rows under this table's own UNIQUE(scale_type/city_class, effective_from) constraint -
-        // both LessThanEqual queries then pick these as the most-recent rate as-of this test's Aug-2026 period end.
+        // real seeded DA/HRA rate rows under this table's own UNIQUE(scale_type/city_class, effective_from)
+        // constraint. Both LessThanEqual/range lookups have no staleness bound, so this 2026-08-15 seed
+        // still correctly resolves as "the most recent applicable rate" for the batch's far-future period
+        // below - only the batch's own (sal_month, sal_year) needed to move, not these rate dates.
         daRateHistoryRepository.save(new DaRateHistory(ScaleType.IDA, LocalDate.of(2026, 8, 15), new BigDecimal("17.00"), true));
         payrollHraRateRepository.save(new PayrollHraRate("Z", new BigDecimal("10.00"), BigDecimal.ZERO, LocalDate.of(2026, 8, 15), null, null));
 
-        batch = payrollBatchRepository.save(new PayrollBatch("BATCH-EDITCASC-1", 8, 2026, "2026-2027"));
+        // Far-future year, not the wall-clock-adjacent 2026 this line previously hardcoded -
+        // payroll_batches enforces UNIQUE(sal_month, sal_year) globally, and a real, manually-created
+        // batch for August 2026 already exists on the shared local dev Postgres instance (created via the
+        // live PayrollBatchService, unrelated to any test), so any test hardcoding a near-current-date
+        // period risks colliding with it.
+        batch = payrollBatchRepository.save(new PayrollBatch("BATCH-EDITCASC-1", 8, 2085, "2085-2086"));
         batch.setStatus(PayrollBatchStatus.CALCULATED);
         payrollBatchRepository.save(batch);
 
         record = recordRepository.save(new PayrollMonthlyRecord(batch, employee, employee.getEmployeeCode(),
-                8, 2026, null, null, "Z", "IDA", 31));
+                8, 2085, null, null, "Z", "IDA", 31));
         record.setBasicPay(new BigDecimal("50000.00"));
         record.setGrossAmount(new BigDecimal("63500.00")); // 50000 + DA 8500 + HRA 5000
         record.setTotalDeductions(new BigDecimal("7020.00")); // CPF 12% of 58500
@@ -149,7 +156,12 @@ class PayrollBatchCascadeAndReportsTest {
 
         List<in.gov.jci.hrms.entity.PayrollEditLog> logs = editLogRepository.findByRecord_TranIdOrderByEditedAtDesc(record.getTranId());
         assertThat(logs).hasSize(8); // BASIC, DA, HRA, CPF, EPF(stat), PENSION(stat), JCPF(stat), P.Tax
-        assertThat(logs).filteredOn(l -> l.getHeadCount() == HEAD_BASIC)
+        // payroll_edit_logs.head_count carries no salary-vs-statutory namespace flag, and HEAD_BASIC (1) and
+        // STAT_HEAD_EPF (1) are numerically identical by coincidence of the two independent numbering
+        // schemes - filtering on headCount alone also catches the EPF cascade row, so pin on newAmount
+        // (60000.00 is unique to the Basic Pay line itself among all 8 logged changes) to isolate it.
+        assertThat(logs).filteredOn(l -> l.getHeadCount() == HEAD_BASIC && l.getNewAmount().compareTo(new BigDecimal("60000.00")) == 0)
+                .hasSize(1)
                 .allSatisfy(l -> assertThat(l.getChangeReason()).isEqualTo("Correction per revised pay order"));
         assertThat(logs).filteredOn(l -> l.getHeadCount() == HEAD_DA_IDA)
                 .allSatisfy(l -> {
@@ -191,8 +203,15 @@ class PayrollBatchCascadeAndReportsTest {
 
         assertThat(report.columns()).contains("EEShare", "ERShare", "TotalCPF");
         assertThat(report.rows()).hasSize(1);
-        assertThat(report.rows().get(0).get("EEShare")).isEqualTo(new BigDecimal("8424.00"));
-        assertThat(report.rows().get(0).get("ERShare")).isEqualTo(new BigDecimal("8424.00"));
+        // isEqualByComparingTo (scale-insensitive), matching every other BigDecimal assertion in this file
+        // - PayrollBatchEditService persists cascaded amounts via round() (scale 0), and this same
+        // @Transactional test reads them back from the same persistence context without an intervening
+        // fresh fetch, so the in-memory BigDecimal here legitimately carries scale 0 ("8424") rather than
+        // the amount_column's declared NUMERIC(12,2) scale ("8424.00") a cross-transaction read would
+        // normalize to - isEqualTo (Object#equals, scale-sensitive) would flag that as unequal even though
+        // the two values are numerically identical.
+        assertThat((BigDecimal) report.rows().get(0).get("EEShare")).isEqualByComparingTo("8424.00");
+        assertThat((BigDecimal) report.rows().get(0).get("ERShare")).isEqualByComparingTo("8424.00");
     }
 
     @Test

@@ -115,12 +115,20 @@ class LeaveApplicationServiceTest {
             return saved;
         });
 
-        LeaveApplicationResponse response = leaveApplicationService.create(validRequest());
+        LeaveApplicationResponse response = leaveApplicationService.create(validRequest(), EMPLOYEE_ID, false);
 
         assertThat(response.status()).isEqualTo(LeaveApplicationStatus.DRAFT);
         assertThat(response.totalDays()).isEqualByComparingTo("3.0");
         org.mockito.Mockito.verifyNoInteractions(leaveBalanceRepository);
         org.mockito.Mockito.verifyNoInteractions(supervisorResolutionService);
+    }
+
+    /** SEC-007 (docs/security/SEC_001_002_REMEDIATION.md pattern). */
+    @Test
+    void create_forAnotherEmployee_whenOnBehalfOfOthersNotPermitted_throwsAccessDenied() {
+        assertThatThrownBy(() -> leaveApplicationService.create(validRequest(), 99L, false))
+                .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+        org.mockito.Mockito.verifyNoInteractions(leaveApplicationRepository);
     }
 
     @Test
@@ -133,7 +141,7 @@ class LeaveApplicationServiceTest {
                 .thenReturn(new BigDecimal("2.5"));
         when(leaveApplicationRepository.saveAndFlush(any(LeaveApplication.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        LeaveApplicationResponse response = leaveApplicationService.create(validRequest());
+        LeaveApplicationResponse response = leaveApplicationService.create(validRequest(), EMPLOYEE_ID, false);
 
         assertThat(response.totalDays()).isEqualByComparingTo("2.5");
     }
@@ -145,7 +153,7 @@ class LeaveApplicationServiceTest {
         when(leaveValidationService.validateAndComputeDebitableDays(any(), any(), any(), any(), any()))
                 .thenThrow(new BusinessRuleViolationException("endDate must not be before startDate"));
 
-        assertThatThrownBy(() -> leaveApplicationService.create(validRequest()))
+        assertThatThrownBy(() -> leaveApplicationService.create(validRequest(), EMPLOYEE_ID, false))
                 .isInstanceOf(BusinessRuleViolationException.class);
     }
 
@@ -158,7 +166,7 @@ class LeaveApplicationServiceTest {
         org.mockito.Mockito.doThrow(new BusinessRuleViolationException("totalDays does not match"))
                 .when(leaveValidationService).validateTotalDaysMatches(any(), any());
 
-        assertThatThrownBy(() -> leaveApplicationService.create(validRequest()))
+        assertThatThrownBy(() -> leaveApplicationService.create(validRequest(), EMPLOYEE_ID, false))
                 .isInstanceOf(BusinessRuleViolationException.class);
     }
 
@@ -166,7 +174,7 @@ class LeaveApplicationServiceTest {
     void create_whenEmployeeMissing_throwsEmployeeNotFoundException() {
         when(employeeRepository.findById(EMPLOYEE_ID)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> leaveApplicationService.create(validRequest()))
+        assertThatThrownBy(() -> leaveApplicationService.create(validRequest(), EMPLOYEE_ID, false))
                 .isInstanceOf(EmployeeNotFoundException.class);
     }
 
@@ -175,7 +183,7 @@ class LeaveApplicationServiceTest {
         when(employeeRepository.findById(EMPLOYEE_ID)).thenReturn(Optional.of(employee));
         when(leaveTypeRepository.findById(LEAVE_TYPE_ID)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> leaveApplicationService.create(validRequest()))
+        assertThatThrownBy(() -> leaveApplicationService.create(validRequest(), EMPLOYEE_ID, false))
                 .isInstanceOf(MasterDataNotFoundException.class);
     }
 

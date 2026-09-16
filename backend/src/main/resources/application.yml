@@ -29,9 +29,14 @@ spring:
       resourceserver:
         jwt:
           # Real IdP (Keycloak/Auth0/etc.) not yet provisioned for any environment.
-          # Blank here means SecurityConfig.jwtDecoder() falls back to a local HS256
-          # decoder (security.jwt.local-dev-secret below) instead of OIDC discovery -
-          # see its javadoc. Set this once a real issuer exists.
+          # Blank by default everywhere. SecurityConfig.jwtDecoder() no longer infers
+          # anything from this being blank on its own (SEC-001,
+          # docs/security/SEC_001_002_REMEDIATION.md) - which decoder is built is
+          # governed explicitly by security.auth.mode below, and
+          # AuthenticationModeGuard refuses to start a production-like deploy
+          # (SPRING_PROFILES_ACTIVE=staging|prod) that reaches this bean with
+          # security.auth.mode=oidc and this still blank. Set this once a real
+          # issuer exists.
           issuer-uri: ${JWT_ISSUER_URI:}
   cache:
     cache-names: pincodeCache,ifscCache
@@ -49,9 +54,19 @@ spring:
       max-file-size: 10MB
       max-request-size: 15MB
 
-# Local/test-only JWT signing secret for the SecurityConfig.jwtDecoder() fallback used
-# when issuer-uri above is blank - NEVER reuse this default outside local dev/CI.
+# SEC-001 (docs/security/SEC_001_002_REMEDIATION.md): security.auth.mode is the
+# explicit, positive switch between the two SecurityConfig.jwtDecoder() paths -
+# "oidc" (real OIDC issuer, issuer-uri above must be set) or "local-dev" (the
+# HS256 fallback below). Defaults to local-dev so `mvn spring-boot:run`/tests
+# keep working with zero setup, but AuthenticationModeGuard refuses to honor
+# local-dev (or an unset/unrecognized mode) once SPRING_PROFILES_ACTIVE marks
+# the environment staging/prod - see SecurityConfig.jwtDecoder() javadoc.
+#
+# local-dev-secret is the local/test-only JWT signing secret for that HS256
+# fallback - NEVER reuse this default outside local dev/CI.
 security:
+  auth:
+    mode: ${SECURITY_AUTH_MODE:local-dev}
   jwt:
     local-dev-secret: ${JWT_LOCAL_DEV_SECRET:local-dev-only-secret-key-never-use-in-production-32bytes}
 
@@ -70,6 +85,14 @@ management:
 hrms:
   storage:
     local-dir: ${HRMS_STORAGE_LOCAL_DIR:./uploads}
+  # RBAC_SECURITY_REQUIREMENTS.md / ONBOARDING_SECURITY_REQUIREMENTS.md - see
+  # SystemAdminBootstrapRunner / UserOnboardingService.
+  bootstrap:
+    system-admin-employee-id: ${HRMS_BOOTSTRAP_SYSTEM_ADMIN_EMPLOYEE_ID:8}
+  onboarding:
+    invitation-validity-hours: ${HRMS_ONBOARDING_INVITATION_VALIDITY_HOURS:24}
+  frontend:
+    base-url: ${HRMS_FRONTEND_BASE_URL:http://localhost:5173}
 
 # PLACEHOLDER figures, not confirmed JCI wage-settlement policy - see
 # PayrollRateProperties javadoc. Override once the real numbers are known.

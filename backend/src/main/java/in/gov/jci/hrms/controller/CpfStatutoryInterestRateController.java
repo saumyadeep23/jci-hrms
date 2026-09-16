@@ -34,7 +34,7 @@ public class CpfStatutoryInterestRateController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyRole('CPF_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('CPF_ADMIN')")
     public ResponseEntity<CpfStatutoryInterestRateResponse> create(@Valid @RequestBody CpfStatutoryInterestRateRequest request) {
         CpfStatutoryInterestRateResponse created = rateService.create(request);
         return ResponseEntity.created(URI.create("/api/v1/payroll/trust/interest/rates/" + created.id())).body(created);

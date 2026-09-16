@@ -75,7 +75,11 @@ public class JciEccsReconciliationController {
         return JciEccsLoanReconciliationResponse.from(reconciliationService.reconcileLoan(loanId));
     }
 
+    // SEC-010 (docs/security/RBAC_MIGRATION_REPORT.md): resolving a reconciliation exception is a JCIECCS
+    // financial-approval action - narrowed off the class-level SUPER_ADMIN grant, keeping only the two
+    // functional domain roles the class-level already lists.
     @PostMapping("/{id}/resolve")
+    @PreAuthorize("hasAnyRole('COOP_ADMIN', 'FINANCE_ADMIN')")
     public JciEccsReconciliationResponse resolve(@PathVariable Long id, @Valid @RequestBody JciEccsResolveReconciliationRequest request,
                                                    Authentication authentication) {
         Long performedByEmployeeId = SecurityUtils.currentEmployeeId(authentication);

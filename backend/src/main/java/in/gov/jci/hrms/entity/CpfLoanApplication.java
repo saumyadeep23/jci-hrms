@@ -152,6 +152,26 @@ public class CpfLoanApplication implements Auditable {
     @Column(name = "cpf_application_id")
     private java.util.UUID cpfApplicationId;
 
+    /**
+     * SEC-003/SEC-008 (docs/security/RBAC_IMPLEMENTATION.md): the employeeId of the officer who performed
+     * each lifecycle transition. All nullable - historical rows predate these columns and are never
+     * backfilled (V96 migration). applicantEmployeeId is set once at apply() and never changes;
+     * sanctionedByEmployeeId/disbursedByEmployeeId/rejectedByEmployeeId are set by the corresponding
+     * service method. CpfLoanApplicationService enforces sanctionedBy/disbursedBy != applicantEmployeeId
+     * (maker != checker) using these fields.
+     */
+    @Column(name = "applicant_employee_id")
+    private Long applicantEmployeeId;
+
+    @Column(name = "sanctioned_by_employee_id")
+    private Long sanctionedByEmployeeId;
+
+    @Column(name = "disbursed_by_employee_id")
+    private Long disbursedByEmployeeId;
+
+    @Column(name = "rejected_by_employee_id")
+    private Long rejectedByEmployeeId;
+
     @CreationTimestamp
     @Column(name = "created_at")
     private Instant createdAt;
@@ -403,6 +423,38 @@ public class CpfLoanApplication implements Auditable {
         this.cpfApplicationId = cpfApplicationId;
     }
 
+    public Long getApplicantEmployeeId() {
+        return applicantEmployeeId;
+    }
+
+    public void setApplicantEmployeeId(Long applicantEmployeeId) {
+        this.applicantEmployeeId = applicantEmployeeId;
+    }
+
+    public Long getSanctionedByEmployeeId() {
+        return sanctionedByEmployeeId;
+    }
+
+    public void setSanctionedByEmployeeId(Long sanctionedByEmployeeId) {
+        this.sanctionedByEmployeeId = sanctionedByEmployeeId;
+    }
+
+    public Long getDisbursedByEmployeeId() {
+        return disbursedByEmployeeId;
+    }
+
+    public void setDisbursedByEmployeeId(Long disbursedByEmployeeId) {
+        this.disbursedByEmployeeId = disbursedByEmployeeId;
+    }
+
+    public Long getRejectedByEmployeeId() {
+        return rejectedByEmployeeId;
+    }
+
+    public void setRejectedByEmployeeId(Long rejectedByEmployeeId) {
+        this.rejectedByEmployeeId = rejectedByEmployeeId;
+    }
+
     @Override
     public String auditEntityName() {
         return "CpfLoanApplication";
@@ -426,6 +478,10 @@ public class CpfLoanApplication implements Auditable {
         snapshot.put("isPreclosed", preclosed);
         snapshot.put("status", status);
         snapshot.put("cpfApplicationId", cpfApplicationId);
+        snapshot.put("applicantEmployeeId", applicantEmployeeId);
+        snapshot.put("sanctionedByEmployeeId", sanctionedByEmployeeId);
+        snapshot.put("disbursedByEmployeeId", disbursedByEmployeeId);
+        snapshot.put("rejectedByEmployeeId", rejectedByEmployeeId);
         return snapshot;
     }
 }

@@ -18,6 +18,7 @@ import in.gov.jci.hrms.exception.MasterDataNotFoundException;
 import in.gov.jci.hrms.repository.CpfLoanApplicationRepository;
 import in.gov.jci.hrms.repository.CpfTrustMemberLedgerEntryRepository;
 import in.gov.jci.hrms.repository.EmployeeRepository;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -124,6 +125,7 @@ public class CpfLoanApplicationService {
         loan.setMonthlyRecoveryPrincipal(computeMonthlyRecovery(request.appliedAmount(), request.totalInstallments()));
         loan.setOutstandingBalance(BigDecimal.ZERO);
         loan.setStatus(CpfLoanApplicationStatus.APPLIED);
+        loan.setApplicantEmployeeId(applicantUserId);
 
         return CpfLoanApplicationResponse.from(loanRepository.saveAndFlush(loan));
     }
@@ -142,6 +144,7 @@ public class CpfLoanApplicationService {
         if (loan.getStatus() != CpfLoanApplicationStatus.APPLIED) {
             throw new BusinessRuleViolationException("CPF Loan Application " + loanId + " must be APPLIED to sanction but is " + loan.getStatus());
         }
+        requireDifferentFromApplicant(loan, approvingOfficerId, "sanction");
 
         CpfLoanEligibilityResponse eligibility = checkEligibility(loan.getEmployee().getId(), loan.getLoanType(), loan.getPurpose());
         if (request.sanctionedAmount().compareTo(eligibility.maxPermissibleAmount()) > 0) {
@@ -192,6 +195,7 @@ public class CpfLoanApplicationService {
         loan.setMonthlyRecoveryInterest(monthlyInterest);
         loan.setRecoveryPhase(CpfLoanRecoveryPhase.PRINCIPAL);
         loan.setStatus(CpfLoanApplicationStatus.SANCTIONED);
+        loan.setSanctionedByEmployeeId(approvingOfficerId);
 
         return CpfLoanApplicationResponse.from(loan);
     }
@@ -229,9 +233,11 @@ public class CpfLoanApplicationService {
         if (loan.getStatus() != CpfLoanApplicationStatus.SANCTIONED) {
             throw new BusinessRuleViolationException("CPF Loan Application " + loanId + " must be SANCTIONED to disburse but is " + loan.getStatus());
         }
+        requireDifferentFromApplicant(loan, disburseOfficerId, "disburse");
 
         loan.setStatus(CpfLoanApplicationStatus.DISBURSED);
         loan.setDisbursedAt(Instant.now());
+        loan.setDisbursedByEmployeeId(disburseOfficerId);
         loan.setOutstandingBalance(loan.getSanctionedAmount());
         loan.setRecoveredInstallments(0);
 
@@ -319,6 +325,7 @@ public class CpfLoanApplicationService {
         }
         loan.setStatus(CpfLoanApplicationStatus.REJECTED);
         loan.setRejectionRemarks(remarks);
+        loan.setRejectedByEmployeeId(rejectingOfficerId);
         return CpfLoanApplicationResponse.from(loan);
     }
 
@@ -341,6 +348,21 @@ public class CpfLoanApplicationService {
 
     private CpfLoanApplication findOrThrow(Long id) {
         return loanRepository.findById(id).orElseThrow(() -> new MasterDataNotFoundException("CPF Loan Application", id));
+    }
+
+    /**
+     * SEC-003 maker != checker (docs/security/MAKER_CHECKER_IMPLEMENTATION.md): the officer who applied
+     * for the loan (applicantEmployeeId) may not be the one who sanctions or disburses it, even if that
+     * officer holds a role/permission that would otherwise authorize the checker action. Historical loans
+     * with no recorded applicantEmployeeId (pre-migration rows) are not retroactively blocked - there is
+     * nothing to compare against.
+     */
+    private void requireDifferentFromApplicant(CpfLoanApplication loan, Long actingOfficerId, String action) {
+        Long applicantId = loan.getApplicantEmployeeId();
+        if (applicantId != null && applicantId.equals(actingOfficerId)) {
+            throw new AccessDeniedException(
+                    "CPF Loan Application " + loan.getId() + ": " + action + " cannot be performed by the same employee who applied for it");
+        }
     }
 
     /** Package-visible so CpfApplicationService's bridge (Part 4) can compute the same monthly-recovery figure for a rule-engine-originated loan without re-deriving the formula. */

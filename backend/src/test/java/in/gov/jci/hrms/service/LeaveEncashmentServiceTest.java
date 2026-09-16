@@ -117,7 +117,7 @@ class LeaveEncashmentServiceTest {
     @Test
     void apply_belowFifteenDaysForInServiceEl_throws() {
         LeaveEncashmentRequest request = new LeaveEncashmentRequest(1L, EncashmentType.IN_SERVICE_EL, new BigDecimal("10.00"), null);
-        assertThatThrownBy(() -> service.apply(request)).isInstanceOf(BusinessRuleViolationException.class);
+        assertThatThrownBy(() -> service.apply(request, 1L, false)).isInstanceOf(BusinessRuleViolationException.class);
     }
 
     // ---- once-per-calendar-year statutory rule (IN_SERVICE_EL only) ----
@@ -132,7 +132,7 @@ class LeaveEncashmentServiceTest {
 
         LeaveEncashmentRequest request = new LeaveEncashmentRequest(1L, EncashmentType.IN_SERVICE_EL, new BigDecimal("15.00"), null);
 
-        assertThatThrownBy(() -> service.apply(request))
+        assertThatThrownBy(() -> service.apply(request, 1L, false))
                 .isInstanceOf(BusinessRuleViolationException.class)
                 .hasMessageContaining("once in a calendar year")
                 .hasMessageContaining("ELE-42");
@@ -157,7 +157,7 @@ class LeaveEncashmentServiceTest {
 
         LeaveEncashmentRequest request = new LeaveEncashmentRequest(1L, EncashmentType.IN_SERVICE_EL, new BigDecimal("15.00"), null);
 
-        assertThat(service.apply(request).elDaysClaimed()).isEqualByComparingTo("15.00");
+        assertThat(service.apply(request, 1L, false).elDaysClaimed()).isEqualByComparingTo("15.00");
     }
 
     @Test
@@ -170,7 +170,7 @@ class LeaveEncashmentServiceTest {
 
         LeaveEncashmentRequest request = new LeaveEncashmentRequest(1L, EncashmentType.IN_SERVICE_EL, new BigDecimal("15.00"), null);
 
-        assertThat(service.apply(request).elDaysClaimed()).isEqualByComparingTo("15.00");
+        assertThat(service.apply(request, 1L, false).elDaysClaimed()).isEqualByComparingTo("15.00");
     }
 
     @Test
@@ -183,20 +183,29 @@ class LeaveEncashmentServiceTest {
 
         LeaveEncashmentRequest request = new LeaveEncashmentRequest(1L, EncashmentType.SUPERANNUATION, new BigDecimal("15.00"), null);
 
-        assertThat(service.apply(request).encashmentType()).isEqualTo(EncashmentType.SUPERANNUATION);
+        assertThat(service.apply(request, 1L, false).encashmentType()).isEqualTo(EncashmentType.SUPERANNUATION);
     }
 
     @Test
     void apply_exceedingEncashableAvailable_throwsInsufficientBalance() {
         LeaveEncashmentRequest request = new LeaveEncashmentRequest(1L, EncashmentType.IN_SERVICE_EL, new BigDecimal("25.00"), null);
-        assertThatThrownBy(() -> service.apply(request)).isInstanceOf(InsufficientLeaveBalanceException.class);
+        assertThatThrownBy(() -> service.apply(request, 1L, false)).isInstanceOf(InsufficientLeaveBalanceException.class);
+    }
+
+    /** SEC-006 (docs/security/SEC_001_002_REMEDIATION.md pattern). */
+    @Test
+    void apply_forAnotherEmployee_whenOnBehalfOfOthersNotPermitted_throwsAccessDenied() {
+        LeaveEncashmentRequest request = new LeaveEncashmentRequest(1L, EncashmentType.IN_SERVICE_EL, new BigDecimal("15.00"), null);
+
+        assertThatThrownBy(() -> service.apply(request, 99L, false))
+                .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
     }
 
     @Test
     void apply_valid_reservesEncashableDays() {
         LeaveEncashmentRequest request = new LeaveEncashmentRequest(1L, EncashmentType.IN_SERVICE_EL, new BigDecimal("15.00"), null);
 
-        LeaveEncashmentResponse response = service.apply(request);
+        LeaveEncashmentResponse response = service.apply(request, 1L, false);
 
         assertThat(balance.getEncashableReserved()).isEqualByComparingTo("15.00");
         assertThat(balance.getEncashableAvailable()).isEqualByComparingTo("5.00");

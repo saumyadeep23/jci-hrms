@@ -75,35 +75,35 @@ public class CpfDisputeAdminController {
     }
 
     @PostMapping("/{id}/assign")
-    @PreAuthorize("hasAnyRole('CPF_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('CPF_ADMIN')")
     public CpfDisputeAdminResponse assign(@PathVariable Long id, @Valid @RequestBody CpfDisputeAssignRequest request,
                                            Authentication authentication) {
         return disputeService.assign(id, request.assigneeEmployeeId(), request.expectedVersion(), actorId(authentication));
     }
 
     @PostMapping("/{id}/start-review")
-    @PreAuthorize("hasAnyRole('CPF_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('CPF_ADMIN')")
     public CpfDisputeAdminResponse startReview(@PathVariable Long id, @Valid @RequestBody CpfDisputeStartReviewRequest request,
                                                 Authentication authentication) {
         return disputeService.startReview(id, request.expectedVersion(), actorId(authentication));
     }
 
     @PostMapping("/{id}/request-clarification")
-    @PreAuthorize("hasAnyRole('CPF_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('CPF_ADMIN')")
     public CpfDisputeAdminResponse requestClarification(@PathVariable Long id, @Valid @RequestBody CpfDisputeReviewActionRequest request,
                                                          Authentication authentication) {
         return disputeService.requestClarification(id, request.remarks(), request.expectedVersion(), actorId(authentication));
     }
 
     @PostMapping("/{id}/resolve")
-    @PreAuthorize("hasAnyRole('CPF_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('CPF_ADMIN')")
     public CpfDisputeAdminResponse resolve(@PathVariable Long id, @Valid @RequestBody CpfDisputeReviewActionRequest request,
                                             Authentication authentication) {
         return disputeService.resolve(id, request.remarks(), request.expectedVersion(), actorId(authentication));
     }
 
     @PostMapping("/{id}/reject")
-    @PreAuthorize("hasAnyRole('CPF_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('CPF_ADMIN')")
     public CpfDisputeAdminResponse reject(@PathVariable Long id, @Valid @RequestBody CpfDisputeReviewActionRequest request,
                                            Authentication authentication) {
         return disputeService.reject(id, request.remarks(), request.expectedVersion(), actorId(authentication));

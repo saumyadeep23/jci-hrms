@@ -93,7 +93,7 @@ class AttendanceRegularizationServiceTest {
         AttendanceRegularizationRequest request = new AttendanceRegularizationRequest(1L, LocalDate.of(2026, 3, 10),
                 RegularizationReasonCode.FORGOT_PUNCH, "Forgot to punch", Instant.now(), Instant.now());
 
-        assertThatThrownBy(() -> service.submit(request)).isInstanceOf(BusinessRuleViolationException.class);
+        assertThatThrownBy(() -> service.submit(request, 1L, false)).isInstanceOf(BusinessRuleViolationException.class);
     }
 
     @Test
@@ -163,7 +163,7 @@ class AttendanceRegularizationServiceTest {
         AttendanceRegularizationRequest request = new AttendanceRegularizationRequest(1L, LocalDate.of(2026, 3, 10),
                 RegularizationReasonCode.FORGOT_PUNCH, "Forgot to punch", Instant.now(), Instant.now());
 
-        assertThatThrownBy(() -> service.submit(request))
+        assertThatThrownBy(() -> service.submit(request, 1L, false))
                 .isInstanceOf(in.gov.jci.hrms.exception.DuplicatePendingRegularizationException.class);
 
         org.mockito.Mockito.verify(regularizationRepository, org.mockito.Mockito.never()).saveAndFlush(any());
@@ -176,7 +176,32 @@ class AttendanceRegularizationServiceTest {
         AttendanceRegularizationRequest request = new AttendanceRegularizationRequest(1L, LocalDate.of(2026, 3, 10),
                 RegularizationReasonCode.FORGOT_PUNCH, "Forgot to punch", Instant.now(), Instant.now());
 
-        AttendanceRegularizationResponse response = service.submit(request);
+        AttendanceRegularizationResponse response = service.submit(request, 1L, false);
+
+        assertThat(response.approvalStatus()).isEqualTo(ApprovalStatus.PENDING);
+    }
+
+    // ---- SEC-005 (docs/security/SEC_001_002_REMEDIATION.md pattern) ----
+
+    @Test
+    void submit_forAnotherEmployee_whenOnBehalfOfOthersNotPermitted_throwsAccessDenied() {
+        AttendanceRegularizationRequest request = new AttendanceRegularizationRequest(1L, LocalDate.of(2026, 3, 10),
+                RegularizationReasonCode.FORGOT_PUNCH, "Forgot to punch", Instant.now(), Instant.now());
+
+        assertThatThrownBy(() -> service.submit(request, 99L, false))
+                .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+
+        org.mockito.Mockito.verify(regularizationRepository, org.mockito.Mockito.never()).saveAndFlush(any());
+    }
+
+    @Test
+    void submit_forAnotherEmployee_whenOnBehalfOfOthersPermitted_succeeds() {
+        when(regularizationRepository.existsByEmployeeIdAndAttendanceDateAndApprovalStatus(
+                1L, LocalDate.of(2026, 3, 10), ApprovalStatus.PENDING)).thenReturn(false);
+        AttendanceRegularizationRequest request = new AttendanceRegularizationRequest(1L, LocalDate.of(2026, 3, 10),
+                RegularizationReasonCode.FORGOT_PUNCH, "Forgot to punch", Instant.now(), Instant.now());
+
+        AttendanceRegularizationResponse response = service.submit(request, 99L, true);
 
         assertThat(response.approvalStatus()).isEqualTo(ApprovalStatus.PENDING);
     }

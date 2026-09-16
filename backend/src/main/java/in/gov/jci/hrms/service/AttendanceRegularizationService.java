@@ -73,8 +73,18 @@ public class AttendanceRegularizationService {
         this.supervisorResolutionService = supervisorResolutionService;
     }
 
+    /**
+     * SEC-005 remediation (docs/security/SEC_001_002_REMEDIATION.md pattern, applied here as part
+     * of the RBAC implementation): callerEmployeeId/onBehalfOfOthersPermitted are the controller's
+     * already-resolved caller identity and authorization decision, re-checked here as
+     * defense-in-depth (same pattern as MobilePunchService.create()).
+     */
     @Transactional
-    public AttendanceRegularizationResponse submit(AttendanceRegularizationRequest request) {
+    public AttendanceRegularizationResponse submit(AttendanceRegularizationRequest request, Long callerEmployeeId, boolean onBehalfOfOthersPermitted) {
+        if (!onBehalfOfOthersPermitted && !request.employeeId().equals(callerEmployeeId)) {
+            throw new org.springframework.security.access.AccessDeniedException(
+                    "Not authorized to submit an attendance regularization for employee " + request.employeeId() + " on behalf of another employee");
+        }
         Employee employee = employeeRepository.findById(request.employeeId())
                 .orElseThrow(() -> new EmployeeNotFoundException(request.employeeId()));
         DailyAttendance dailyAttendance = dailyAttendanceRepository

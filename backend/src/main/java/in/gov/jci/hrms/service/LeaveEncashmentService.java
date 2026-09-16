@@ -175,8 +175,13 @@ public class LeaveEncashmentService {
         return month == null || month == 0 || decisionDate.getMonthValue() == month;
     }
 
+    /** SEC-006 remediation (docs/security/SEC_001_002_REMEDIATION.md pattern): same defense-in-depth shape as MobilePunchService.create()/AttendanceRegularizationService.submit(). */
     @Transactional
-    public LeaveEncashmentResponse apply(LeaveEncashmentRequest request) {
+    public LeaveEncashmentResponse apply(LeaveEncashmentRequest request, Long callerEmployeeId, boolean onBehalfOfOthersPermitted) {
+        if (!onBehalfOfOthersPermitted && !request.employeeId().equals(callerEmployeeId)) {
+            throw new org.springframework.security.access.AccessDeniedException(
+                    "Not authorized to apply for leave encashment for employee " + request.employeeId() + " on behalf of another employee");
+        }
         Employee employee = employeeRepository.findById(request.employeeId())
                 .orElseThrow(() -> new EmployeeNotFoundException(request.employeeId()));
 

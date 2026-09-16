@@ -182,7 +182,8 @@ class JciEccsReconciliationServiceTest {
                 employee.getId());
         var recoveries = recoveryRepository.findByMember_IdOrderByCreatedAtDesc(member.getId());
         var recoveryToReverse = recoveries.get(0);
-        recoveryService.reverseRecovery(recoveryToReverse.getId(), "Employer requested reversal", employee.getId());
+        // SEC-004 (docs/security/SEC_001_002_REMEDIATION.md pattern): maker != checker.
+        recoveryService.reverseRecovery(recoveryToReverse.getId(), "Employer requested reversal", employee.getId() + 1_000_000L);
 
         var summary = reconciliationService.reconcilePayrollRun(payrollRunId, employee.getId());
         var principalRow = rowFor(summary, JciEccsRecoveryComponent.TERM_PRINCIPAL);

@@ -57,7 +57,7 @@ public class CpfWithdrawalMasterController {
     }
 
     @PostMapping("/payroll-deduction-cap")
-    @PreAuthorize("hasAnyRole('CPF_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('CPF_ADMIN')")
     public CpfPayrollDeductionCapResponse reviseDeductionCap(@Valid @RequestBody CpfPayrollDeductionCapRequest request) {
         return deductionCapService.revise(request);
     }

@@ -16,6 +16,7 @@ import in.gov.jci.hrms.repository.CpfLoanApplicationRepository;
 import in.gov.jci.hrms.repository.CpfLoanSettlementRepository;
 import in.gov.jci.hrms.repository.CpfTrustMemberLedgerEntryRepository;
 import in.gov.jci.hrms.repository.EmployeeRepository;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -147,6 +148,18 @@ public class CpfLoanSettlementService {
         if (loan.getStatus() != CpfLoanApplicationStatus.DISBURSED) {
             throw new BusinessRuleViolationException(
                     "CPF Loan Application " + loanId + " must be DISBURSED to record a cash settlement but is " + loan.getStatus());
+        }
+        // SEC-003 maker != checker (docs/security/MAKER_CHECKER_IMPLEMENTATION.md), extended to
+        // settle-cash per the SEC-010 closure review: settlement is a financially authoritative
+        // transition (it reduces outstanding balance, credits the member's own EE ledger, and can close
+        // the loan) exactly like sanction/disburse, so the officer who applied for the loan may not also
+        // be the one who receives its cash settlement, even if they hold a role that would otherwise
+        // authorize it. Historical loans with no recorded applicantEmployeeId are not retroactively
+        // blocked - checked, and rejected, before any balance/ledger mutation below.
+        Long applicantId = loan.getApplicantEmployeeId();
+        if (applicantId != null && applicantId.equals(receivedByOfficerId)) {
+            throw new AccessDeniedException(
+                    "CPF Loan Application " + loanId + ": settle-cash cannot be performed by the same employee who applied for it");
         }
 
         CpfLoanSettlementQuoteResponse quote = buildQuote(loan, LocalDate.now());

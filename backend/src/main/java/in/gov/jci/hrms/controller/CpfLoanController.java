@@ -77,7 +77,13 @@ public class CpfLoanController {
         return cpfLoanApplicationService.findAll(status, pageable);
     }
 
+    // SEC-010 (docs/security/RBAC_MIGRATION_REPORT.md): sanction/disburse/reject/settle-cash are the
+    // CPF financial checker-only approval actions SEC-003's requireDifferentFromApplicant() enforces
+    // maker!=checker on - narrowed off the class-level SUPER_ADMIN grant so the legacy god-role cannot
+    // provide an authorization path around that same boundary. FINANCE_ADMIN/CPF_ADMIN (the class-level's
+    // functional roles) are unaffected.
     @PutMapping("/{id}/sanction")
+    @PreAuthorize("hasAnyRole('FINANCE_ADMIN', 'CPF_ADMIN')")
     public CpfLoanApplicationResponse sanction(@PathVariable Long id, @Valid @RequestBody CpfLoanSanctionRequest request,
                                                  Authentication authentication) {
         Long approvingOfficerId = SecurityUtils.currentEmployeeId(authentication);
@@ -85,12 +91,14 @@ public class CpfLoanController {
     }
 
     @PutMapping("/{id}/disburse")
+    @PreAuthorize("hasAnyRole('FINANCE_ADMIN', 'CPF_ADMIN')")
     public CpfLoanApplicationResponse disburse(@PathVariable Long id, Authentication authentication) {
         Long disburseOfficerId = SecurityUtils.currentEmployeeId(authentication);
         return cpfLoanApplicationService.disburseLoan(id, disburseOfficerId);
     }
 
     @PutMapping("/{id}/reject")
+    @PreAuthorize("hasAnyRole('FINANCE_ADMIN', 'CPF_ADMIN')")
     public CpfLoanApplicationResponse reject(@PathVariable Long id, @Valid @RequestBody RejectRemarksRequest request,
                                                Authentication authentication) {
         Long rejectingOfficerId = SecurityUtils.currentEmployeeId(authentication);
@@ -103,6 +111,7 @@ public class CpfLoanController {
     }
 
     @PostMapping("/{id}/settle-cash")
+    @PreAuthorize("hasAnyRole('FINANCE_ADMIN', 'CPF_ADMIN')")
     public CpfLoanSettlementResponse settleCash(@PathVariable Long id, @Valid @RequestBody CpfLoanSettlementRequest request,
                                                   Authentication authentication) {
         Long receivedByOfficerId = SecurityUtils.currentEmployeeId(authentication);

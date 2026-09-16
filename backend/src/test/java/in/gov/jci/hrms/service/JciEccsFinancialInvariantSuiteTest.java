@@ -193,7 +193,9 @@ class JciEccsFinancialInvariantSuiteTest {
                         JciEccsDebitStatus.DEBIT_SUCCESS, null, "TXN-INV"))),
                 employee.getId());
         JciEccsRecovery posted = recoveryRepository.findByMember_IdOrderByCreatedAtDesc(member.getId()).get(0);
-        recoveryService.reverseRecovery(posted.getId(), "Invariant suite reversal", employee.getId());
+        // SEC-004 (docs/security/SEC_001_002_REMEDIATION.md pattern): maker != checker - reverseRecovery()
+        // only compares this id against posted.getCreatedBy(), never looks up an Employee row for it.
+        recoveryService.reverseRecovery(posted.getId(), "Invariant suite reversal", employee.getId() + 1_000_000L);
 
         assertThat(integrityCheckService.checkLoan(loan.getId())).isEmpty();
         for (JciEccsRecovery recovery : recoveryRepository.findByMember_IdOrderByCreatedAtDesc(member.getId())) {

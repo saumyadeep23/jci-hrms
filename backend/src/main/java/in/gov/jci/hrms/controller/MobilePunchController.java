@@ -2,7 +2,7 @@ package in.gov.jci.hrms.controller;
 
 import in.gov.jci.hrms.dto.MobilePunchRequest;
 import in.gov.jci.hrms.dto.MobilePunchResponse;
-import in.gov.jci.hrms.exception.BusinessRuleViolationException;
+import in.gov.jci.hrms.security.AttendanceAggregationSecurity;
 import in.gov.jci.hrms.security.SecurityUtils;
 import in.gov.jci.hrms.service.MobilePunchService;
 import jakarta.validation.Valid;
@@ -25,37 +25,37 @@ import java.net.URI;
 public class MobilePunchController {
 
     private final MobilePunchService mobilePunchService;
+    private final AttendanceAggregationSecurity attendanceAggSec;
 
-    public MobilePunchController(MobilePunchService mobilePunchService) {
+    public MobilePunchController(MobilePunchService mobilePunchService, AttendanceAggregationSecurity attendanceAggSec) {
         this.mobilePunchService = mobilePunchService;
+        this.attendanceAggSec = attendanceAggSec;
     }
 
     /**
-     * Any authenticated staff member can punch their own attendance,
-     * regardless of which admin-tier role(s) their token also carries - a
-     * FINANCE_ADMIN or SUPER_ADMIN is still a person who shows up to work.
-     * employeeId is resolved from the JWT's employee_id claim when the ESS
-     * mobile client omits it from the request body; an explicit employeeId
-     * in the body (e.g. from an HR tool) is honored as-is.
+     * SEC-002 remediation (docs/security/SEC_001_002_REMEDIATION.md): a
+     * caller may only ever punch their OWN attendance - the server derives
+     * identity from the JWT's employee_id claim (SecurityUtils.currentEmployeeId),
+     * never trusting a client-supplied employeeId as-is. An explicit
+     * employeeId in the body targeting someone else is honored only for a
+     * caller in HR_ADMIN/SUPER_ADMIN (the "HR tool punches on someone's
+     * behalf" case this endpoint's javadoc always described, now actually
+     * enforced), reusing this codebase's existing self-or-HR/admin gate
+     * (@attendanceAggSec, already used the same way by
+     * AttendanceAggregationController and LeaveLedgerEntryController) rather
+     * than inventing a new ownership mechanism just for this endpoint.
+     * MobilePunchService.create() independently re-derives and re-checks the
+     * same rule from its own two parameters below - defense in depth so a
+     * future caller of that service method through some other API path
+     * cannot silently bypass ownership.
      */
     @PostMapping
-    @PreAuthorize("isAuthenticated()")
+    @PreAuthorize("@attendanceAggSec.canEvaluateFor(authentication, #request.employeeId())")
     public ResponseEntity<MobilePunchResponse> create(@Valid @RequestBody MobilePunchRequest request, Authentication authentication) {
-        MobilePunchResponse created = mobilePunchService.create(resolveEmployeeId(request, authentication));
+        Long callerEmployeeId = SecurityUtils.currentEmployeeId(authentication);
+        boolean onBehalfOfOthersPermitted = attendanceAggSec.canActOnBehalfOfOthers(authentication);
+        MobilePunchResponse created = mobilePunchService.create(request, callerEmployeeId, onBehalfOfOthersPermitted);
         return ResponseEntity.created(URI.create("/api/attendance/punch/" + created.id())).body(created);
-    }
-
-    private MobilePunchRequest resolveEmployeeId(MobilePunchRequest request, Authentication authentication) {
-        if (request.employeeId() != null) {
-            return request;
-        }
-        Long employeeId = SecurityUtils.currentEmployeeId(authentication);
-        if (employeeId == null) {
-            throw new BusinessRuleViolationException(
-                    "employeeId was not supplied and could not be resolved from the token's employee_id claim");
-        }
-        return new MobilePunchRequest(employeeId, request.punchTime(), request.punchType(), request.latitude(),
-                request.longitude(), request.accuracyMeters(), request.deviceId(), request.photoS3Key());
     }
 
     @GetMapping("/{id}")

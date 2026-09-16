@@ -284,6 +284,59 @@ class CpfLoanTwoPhaseAndSettlementTest {
         assertThat(reloaded.isPreclosed()).isTrue();
     }
 
+    // SEC-010 closure (docs/security/MAKER_CHECKER_IMPLEMENTATION.md): settle-cash extends SEC-003's
+    // maker != checker rule - the officer who applied for the loan may not also receive its cash
+    // settlement, even holding a role that would otherwise authorize it.
+    @Test
+    void settleCash_bySameOfficerWhoApplied_throwsAccessDeniedAndAppliesNoMutation() {
+        Employee employee = newEmployee("EMP-CPFL2P-S1", "cpfl2pS1@example.com");
+        seedBalance(employee, new BigDecimal("30000.00"), BigDecimal.ZERO);
+        long applicantId = employee.getId();
+
+        CpfLoanApplicationResponse applied = cpfLoanApplicationService.applyLoan(new CpfLoanApplicationRequest(
+                employee.getId(), CpfLoanType.REFUNDABLE_LOAN, "HOUSING", new BigDecimal("12000.00"), 12, "Home repair"), applicantId);
+        cpfLoanApplicationService.sanctionLoan(applied.id(),
+                new CpfLoanSanctionRequest(new BigDecimal("12000.00"), "SANC/2P/S1", SANCTION_DATE, 12, 12, null, null, null),
+                applicantId + 1_000_000L);
+        cpfLoanApplicationService.disburseLoan(applied.id(), applicantId + 1_000_000L);
+
+        CpfLoanSettlementRequest settlementRequest = new CpfLoanSettlementRequest(new BigDecimal("12000.00"), BigDecimal.ZERO,
+                CpfLoanSettlementMode.CASH, "CASH-RECEIPT-S1", LocalDate.now(), LocalDate.now(), "TRUST-BANK-01", null, "Same-actor settle attempt");
+
+        assertThatThrownBy(() -> cpfLoanSettlementService.processCashSettlement(applied.id(), settlementRequest, applicantId))
+                .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+
+        CpfLoanApplicationResponse reloaded = cpfLoanApplicationService.findByEmployee(employee.getId()).stream()
+                .filter(l -> l.id().equals(applied.id())).findFirst().orElseThrow();
+        assertThat(reloaded.outstandingBalance()).isEqualByComparingTo("12000.00");
+        assertThat(reloaded.status()).isEqualTo(CpfLoanApplicationStatus.DISBURSED);
+    }
+
+    @Test
+    void settleCash_byDifferentOfficerThanApplicant_allowed() {
+        Employee employee = newEmployee("EMP-CPFL2P-S2", "cpfl2pS2@example.com");
+        seedBalance(employee, new BigDecimal("30000.00"), BigDecimal.ZERO);
+        long applicantId = employee.getId();
+
+        CpfLoanApplicationResponse applied = cpfLoanApplicationService.applyLoan(new CpfLoanApplicationRequest(
+                employee.getId(), CpfLoanType.REFUNDABLE_LOAN, "HOUSING", new BigDecimal("12000.00"), 12, "Home repair"), applicantId);
+        cpfLoanApplicationService.sanctionLoan(applied.id(),
+                new CpfLoanSanctionRequest(new BigDecimal("12000.00"), "SANC/2P/S2", SANCTION_DATE, 12, 12, null, null, null),
+                applicantId + 1_000_000L);
+        cpfLoanApplicationService.disburseLoan(applied.id(), applicantId + 1_000_000L);
+
+        CpfLoanSettlementRequest settlementRequest = new CpfLoanSettlementRequest(new BigDecimal("12000.00"), BigDecimal.ZERO,
+                CpfLoanSettlementMode.CASH, "CASH-RECEIPT-S2", LocalDate.now(), LocalDate.now(), "TRUST-BANK-01", null, "Different-actor settle");
+
+        CpfLoanSettlementResponse settlement = cpfLoanSettlementService.processCashSettlement(applied.id(), settlementRequest,
+                applicantId + 1_000_000L);
+        assertThat(settlement.receiptVoucherNo()).startsWith("CPFL-RCPT/");
+
+        CpfLoanApplicationResponse reloaded = cpfLoanApplicationService.findByEmployee(employee.getId()).stream()
+                .filter(l -> l.id().equals(applied.id())).findFirst().orElseThrow();
+        assertThat(reloaded.outstandingBalance()).isEqualByComparingTo("0.00");
+    }
+
     @Test
     void settlementQuote_onNonDisbursedLoan_rejected() {
         Employee employee = newEmployee("EMP-CPFL2P-7", "cpfl2p7@example.com");
