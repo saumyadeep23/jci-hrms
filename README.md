@@ -8,8 +8,14 @@ Infrastructure and starter backend for the JCI HRMS project, targeting AWS
 ```
 infra/       Terraform for VPC, RDS PostgreSQL, ECS Fargate, ALB, ECR, S3
 backend/     Spring Boot backend skeleton (Java 21)
+frontend/    React/Vite frontend
+deploy/      Non-AWS host deployment helpers (e.g. the Windows service installer for a LAN box)
 .github/     GitHub Actions CI/CD pipeline: build -> push to ECR -> deploy to ECS
 ```
+
+See `docs/DEPLOYMENT.md` for the full dev/production network, TLS, and backend-lifecycle architecture
+(API routing, the Vite dev proxy, dev-HTTPS for camera/geolocation testing, and how to run the backend
+as a real auto-restarting service instead of a manually-started process).
 
 ## One-time setup before first use
 

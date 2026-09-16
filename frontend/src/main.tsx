@@ -6,6 +6,7 @@ import './index.css'
 import App from './App.tsx'
 import { AuthProvider } from './auth/AuthContext.tsx'
 import { ToastProvider } from './components/common/ToastProvider.tsx'
+import { NetworkStatusBanner } from './components/common/NetworkStatusBanner.tsx'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -23,6 +24,7 @@ createRoot(document.getElementById('root')!).render(
       <BrowserRouter>
         <AuthProvider>
           <ToastProvider>
+            <NetworkStatusBanner />
             <App />
           </ToastProvider>
         </AuthProvider>

@@ -77,11 +77,16 @@ public class SecurityConfig {
     }
 
     /**
-     * The frontend (Phase 12, a separate Vite dev server) calls this API
-     * cross-origin - without this, every browser request from it fails at
-     * the preflight before Spring Security ever sees an Authorization
-     * header. Origins are listed explicitly (not "*") because
-     * allowCredentials(true) requires it.
+     * NETWORK/TLS closure (docs/DEPLOYMENT.md): normal browser traffic no longer needs this. The
+     * frontend's apiClient requests a relative '/api/...' (frontend/src/api/client.ts) which, in dev, is
+     * proxied server-side by Vite (frontend/vite.config.ts's server.proxy) to this backend - a Node-to-
+     * Node HTTP call, never a browser fetch, so it is not subject to CORS at all; in production it is
+     * same-origin behind the reverse proxy. This bean remains as a fallback for anyone who bypasses the
+     * proxy and calls this API directly from browser JS on a different origin (e.g. ad-hoc testing
+     * against a raw http://localhost:8080 target) - it is no longer load-bearing for the primary dev/
+     * prod request path, so a LAN IP outside the two wildcarded subnets below no longer breaks normal
+     * usage the way it used to. Origins are listed explicitly (not "*") because allowCredentials(true)
+     * requires it.
      */
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
@@ -92,14 +97,13 @@ public class SecurityConfig {
                 "https://localhost:5173",
                 "https://127.0.0.1:5173",
                 "http://localhost:3000",
-                // LAN access for real-device testing (e.g. the mobile punch flow's camera/geolocation,
-                // which needs a genuine phone browser, not just responsive-mode devtools) - a wildcard
+                // Fallback only (see class javadoc above) for direct, non-proxied LAN access - a wildcard
                 // pattern for the whole home/office subnet rather than one hardcoded dev machine IP, since
                 // that IP changes across networks/DHCP leases. HTTPS only: mixed content would block API
                 // calls from an HTTPS frontend page anyway once server.ssl.enabled is turned on for this.
-                // Update this pattern whenever the dev machine moves to a different subnet (e.g. switching
-                // between home Wi-Fi and a mobile hotspot) - "Network connection lost" on every request
-                // from a LAN device is the symptom of this pattern no longer matching.
+                // Add this machine's own subnet here only if you have a specific reason to call this API
+                // directly instead of through the Vite proxy - the proxy path (the default, recommended
+                // flow) does not need an entry here at all, on any subnet.
                 "https://192.168.31.*:5173",
                 "https://192.168.137.*:5173"));
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));

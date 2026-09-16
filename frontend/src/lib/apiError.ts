@@ -9,6 +9,14 @@ export interface ApiErrorResponse {
   fieldErrors?: { field: string; message: string }[]
 }
 
+/** True for a genuinely unreachable backend (ERR_CONNECTION_REFUSED, DNS failure, timeout, offline) -
+ * axios never populates `error.response` for these, only for a request that got a real HTTP reply.
+ * Shared by api/client.ts's interceptor and anything else that needs to tell "backend is down" apart
+ * from "backend replied with an error status". */
+export function isNetworkError(error: unknown): boolean {
+  return isAxiosError(error) && !error.response
+}
+
 function apiErrorBody(error: unknown): ApiErrorResponse | null {
   if (!isAxiosError(error)) return null
   const body = error.response?.data
