@@ -30,13 +30,13 @@ public class EmployeeQualificationController {
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN') or @employeeSecurity.isSelf(authentication, #employeeId)")
+    @PreAuthorize("hasRole('HR_ADMIN') or @employeeSecurity.isSelf(authentication, #employeeId)")
     public List<QualificationResponse> list(@PathVariable Long employeeId) {
         return qualificationService.listByEmployee(employeeId);
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public ResponseEntity<QualificationResponse> create(@PathVariable Long employeeId,
                                                           @Valid @RequestBody QualificationRequest request) {
         QualificationResponse created = qualificationService.create(employeeId, request);
@@ -45,21 +45,21 @@ public class EmployeeQualificationController {
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public QualificationResponse update(@PathVariable Long employeeId, @PathVariable Long id,
                                          @Valid @RequestBody QualificationRequest request) {
         return qualificationService.update(employeeId, id, request);
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public ResponseEntity<Void> delete(@PathVariable Long employeeId, @PathVariable Long id) {
         qualificationService.delete(employeeId, id);
         return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/{id}/verify")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public QualificationResponse verify(@PathVariable Long employeeId, @PathVariable Long id,
                                          @RequestHeader(value = "X-Acting-User", required = false) String actingUser) {
         return qualificationService.verify(employeeId, id, actingUser);

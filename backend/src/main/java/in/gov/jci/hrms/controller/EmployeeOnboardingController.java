@@ -38,7 +38,7 @@ import java.net.URI;
  */
 @RestController
 @RequestMapping({"/api/v1/onboarding", "/api/onboarding"})
-@PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+@PreAuthorize("hasRole('HR_ADMIN')")
 public class EmployeeOnboardingController {
 
     private final EmployeeOnboardingService onboardingService;

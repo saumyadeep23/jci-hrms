@@ -21,7 +21,7 @@ import java.net.URI;
 
 @RestController
 @RequestMapping("/api/reimbursements/tada")
-@PreAuthorize("hasAnyRole('EMPLOYEE', 'HR_ADMIN', 'FINANCE_ADMIN', 'SUPER_ADMIN')")
+@PreAuthorize("hasAnyRole('EMPLOYEE', 'HR_ADMIN', 'FINANCE_ADMIN')")
 public class TadaClaimController {
 
     private final TadaClaimService tadaClaimService;
@@ -52,19 +52,19 @@ public class TadaClaimController {
     }
 
     @PostMapping("/{id}/verify")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public TadaClaimResponse verifyByHr(@PathVariable Long id, @Valid @RequestBody TadaClaimVerifyRequest request) {
         return tadaClaimService.verifyByHr(id, request);
     }
 
     @PostMapping("/{id}/approve")
-    @PreAuthorize("hasAnyRole('FINANCE_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('FINANCE_ADMIN')")
     public TadaClaimResponse approveByFinance(@PathVariable Long id, @RequestParam String approvedBy) {
         return tadaClaimService.approveByFinance(id, approvedBy);
     }
 
     @PostMapping("/{id}/reject")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'FINANCE_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('HR_ADMIN', 'FINANCE_ADMIN')")
     public TadaClaimResponse reject(@PathVariable Long id) {
         return tadaClaimService.reject(id);
     }

@@ -28,13 +28,13 @@ public class EmployeeBankAccountController {
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN', 'FINANCE_ADMIN') or @employeeSecurity.isSelf(authentication, #employeeId)")
+    @PreAuthorize("hasAnyRole('HR_ADMIN', 'FINANCE_ADMIN') or @employeeSecurity.isSelf(authentication, #employeeId)")
     public List<EmployeeBankAccountResponse> list(@PathVariable Long employeeId) {
         return bankAccountService.listByEmployee(employeeId);
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN') or @employeeSecurity.isSelf(authentication, #employeeId)")
+    @PreAuthorize("hasRole('HR_ADMIN') or @employeeSecurity.isSelf(authentication, #employeeId)")
     public ResponseEntity<EmployeeBankAccountResponse> addAccount(@PathVariable Long employeeId,
                                                                     @Valid @RequestBody EmployeeBankAccountRequest request) {
         EmployeeBankAccountResponse created = bankAccountService.addAccount(employeeId, request);

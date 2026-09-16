@@ -43,9 +43,16 @@ public class JciEccsMemberController {
     }
 
     /** Membership status is a governance action (Bye-laws 15/16 suspension/cessation), scoped narrower
-     * than the plain read endpoints above - COOP_ADMIN/SUPER_ADMIN only, no FINANCE_ADMIN. */
+     * than the plain read endpoints above - COOP_ADMIN only, no FINANCE_ADMIN. Non-financial RBAC
+     * migration (docs/security/RBAC_MIGRATION_REPORT.md): SUPER_ADMIN removed per confirmed business
+     * direction ("SYSTEM_ADMIN must not independently suspend/cease JCIECCS membership - keep this
+     * under JCIECCS functional administration"); the new DB-backed JCIECCS_APPROVE permission
+     * (JCIECCS_ADMIN role) is added as the forward-looking path, alongside the legacy COOP_ADMIN JWT
+     * role kept as compatibility since no real UserRoleAssignment data exists yet to grant JCIECCS_ADMIN
+     * to anyone (application_users is empty outside the SYSTEM_ADMIN bootstrap - see
+     * RBAC_MIGRATION_REPORT.md's "Migration of existing users" note). */
     @PutMapping("/{id}/status")
-    @PreAuthorize("hasAnyRole('COOP_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('COOP_ADMIN') or @rbac.hasPermission(authentication, 'JCIECCS_APPROVE')")
     public JciEccsMemberResponse changeStatus(@PathVariable Long id, @Valid @RequestBody JciEccsMemberStatusChangeRequest request,
                                                Authentication authentication) {
         return memberService.changeStatus(id, request, SecurityUtils.currentEmployeeId(authentication));

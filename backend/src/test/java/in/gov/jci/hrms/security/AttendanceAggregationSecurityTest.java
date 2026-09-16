@@ -59,9 +59,13 @@ class AttendanceAggregationSecurityTest {
         assertThat(security.canEvaluateFor(tokenFor(1L, "HR_ADMIN"), 2L)).isTrue();
     }
 
+    // Non-financial RBAC migration (docs/security/RBAC_MIGRATION_REPORT.md): acting on another
+    // employee's attendance/leave is an HR business action, not technical administration - SUPER_ADMIN
+    // no longer gets an implicit business-authority bypass here, matching the same boundary already
+    // enforced for CPF/JCIECCS/Payroll under SEC-010.
     @Test
-    void canEvaluateFor_someoneElsesEmployeeId_allowedForSuperAdmin() {
-        assertThat(security.canEvaluateFor(tokenFor(1L, "SUPER_ADMIN"), 2L)).isTrue();
+    void canEvaluateFor_someoneElsesEmployeeId_deniedForSuperAdmin() {
+        assertThat(security.canEvaluateFor(tokenFor(1L, "SUPER_ADMIN"), 2L)).isFalse();
     }
 
     @Test
@@ -77,8 +81,8 @@ class AttendanceAggregationSecurityTest {
     }
 
     @Test
-    void canActOnBehalfOfOthers_trueForSuperAdmin() {
-        assertThat(security.canActOnBehalfOfOthers(tokenFor(1L, "SUPER_ADMIN"))).isTrue();
+    void canActOnBehalfOfOthers_falseForSuperAdmin() {
+        assertThat(security.canActOnBehalfOfOthers(tokenFor(1L, "SUPER_ADMIN"))).isFalse();
     }
 
     @Test

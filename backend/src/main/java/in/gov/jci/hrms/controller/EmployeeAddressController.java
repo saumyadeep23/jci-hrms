@@ -26,13 +26,13 @@ public class EmployeeAddressController {
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN') or @employeeSecurity.isSelf(authentication, #employeeId)")
+    @PreAuthorize("hasRole('HR_ADMIN') or @employeeSecurity.isSelf(authentication, #employeeId)")
     public List<EmployeeAddressResponse> list(@PathVariable Long employeeId) {
         return addressService.listByEmployee(employeeId);
     }
 
     @PutMapping
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN') or @employeeSecurity.isSelf(authentication, #employeeId)")
+    @PreAuthorize("hasRole('HR_ADMIN') or @employeeSecurity.isSelf(authentication, #employeeId)")
     public EmployeeAddressResponse upsert(@PathVariable Long employeeId, @Valid @RequestBody EmployeeAddressRequest request) {
         return addressService.upsert(employeeId, request);
     }

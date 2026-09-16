@@ -54,7 +54,10 @@ public class PfLedgerController {
         return ResponseEntity.created(URI.create("/api/cpf-ledger/diversions/" + created.id())).body(created);
     }
 
+    // Non-financial RBAC migration pass (docs/security/RBAC_MIGRATION_REPORT.md): missed by the earlier
+    // SEC-003/004 closure - settle is a checker-shaped financial action, SUPER_ADMIN removed here too.
     @PostMapping("/diversions/{id}/settle")
+    @PreAuthorize("hasAnyRole('FINANCE_ADMIN', 'CPF_ADMIN', 'COOP_ADMIN')")
     public PfDiversionResponse settle(@PathVariable Long id) {
         return pfLedgerService.settle(id);
     }

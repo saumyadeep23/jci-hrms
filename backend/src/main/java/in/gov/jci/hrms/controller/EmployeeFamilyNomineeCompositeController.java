@@ -24,13 +24,13 @@ public class EmployeeFamilyNomineeCompositeController {
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN') or @employeeSecurity.isSelf(authentication, #employeeId)")
+    @PreAuthorize("hasRole('HR_ADMIN') or @employeeSecurity.isSelf(authentication, #employeeId)")
     public EmployeeFamilyNomineeCompositeResponse get(@PathVariable Long employeeId) {
         return compositeService.get(employeeId);
     }
 
     @PutMapping
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public EmployeeFamilyNomineeCompositeResponse save(@PathVariable Long employeeId,
                                                         @Valid @RequestBody EmployeeFamilyNomineeCompositeRequest request) {
         return compositeService.save(employeeId, request);

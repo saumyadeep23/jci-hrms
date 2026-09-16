@@ -33,7 +33,7 @@ import java.util.List;
  */
 @RestController
 @RequestMapping("/api/v1/masters/grade-scales")
-@PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN', 'EMPLOYEE', 'FINANCE_ADMIN')")
+@PreAuthorize("hasAnyRole('HR_ADMIN', 'EMPLOYEE', 'FINANCE_ADMIN')")
 public class GradeScaleController {
 
     private final GradeScaleMasterService gradeScaleMasterService;
@@ -53,7 +53,7 @@ public class GradeScaleController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'FINANCE_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('HR_ADMIN', 'FINANCE_ADMIN')")
     public ResponseEntity<GradeScaleMasterResponse> create(@Valid @RequestBody GradeScaleCreateRequest request) {
         GradeScaleMasterResponse created = gradeScaleMasterService.create(request);
         return ResponseEntity.created(URI.create("/api/v1/masters/grade-scales/" + created.id())).body(created);
@@ -61,7 +61,7 @@ public class GradeScaleController {
 
     /** Keyed by scaleCode (e.g. "E9"), not the numeric id - the stable, human-meaningful identifier admins actually address a grade by. */
     @PutMapping("/{scaleCode}")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'FINANCE_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('HR_ADMIN', 'FINANCE_ADMIN')")
     public GradeScaleMasterResponse update(@PathVariable String scaleCode, @Valid @RequestBody GradeScaleUpdateRequest request) {
         return gradeScaleMasterService.update(scaleCode, request);
     }

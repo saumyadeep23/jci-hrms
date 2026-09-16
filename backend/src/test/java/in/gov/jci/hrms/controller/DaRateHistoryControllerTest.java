@@ -66,15 +66,15 @@ class DaRateHistoryControllerTest {
                 .andExpect(jsonPath("$.scaleType").value("IDA"));
     }
 
+    // Non-financial RBAC migration (docs/security/RBAC_MIGRATION_REPORT.md): SUPER_ADMIN removed from
+    // this master-data mutation - HR_ADMIN only, matching the pattern used elsewhere in this controller.
     @Test
     @WithMockUser(roles = "SUPER_ADMIN")
-    void create_asSuperAdmin_returns201() throws Exception {
-        when(daRateHistoryService.create(any(DaRateHistoryRequest.class))).thenReturn(responseFor(1L, validRequest()));
-
+    void create_asSuperAdmin_returns403() throws Exception {
         mockMvc.perform(post("/api/da-rates")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(validRequest())))
-                .andExpect(status().isCreated());
+                .andExpect(status().isForbidden());
     }
 
     @Test

@@ -21,7 +21,7 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 @RequestMapping("/api/leave-applications/combined")
-@PreAuthorize("hasAnyRole('EMPLOYEE', 'HR_ADMIN', 'SUPER_ADMIN')")
+@PreAuthorize("hasAnyRole('EMPLOYEE', 'HR_ADMIN')")
 public class CombinedLeaveController {
 
     private final CombinedLeaveApplicationService combinedLeaveApplicationService;

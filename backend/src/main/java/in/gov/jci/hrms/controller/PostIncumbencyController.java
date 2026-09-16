@@ -22,7 +22,7 @@ import java.time.LocalDate;
 
 @RestController
 @RequestMapping("/api/post-incumbencies")
-@PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+@PreAuthorize("hasRole('HR_ADMIN')")
 public class PostIncumbencyController {
 
     private final PostIncumbencyService postIncumbencyService;

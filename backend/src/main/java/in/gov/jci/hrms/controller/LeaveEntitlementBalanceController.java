@@ -41,7 +41,7 @@ public class LeaveEntitlementBalanceController {
 
     /** Admin counterpart of mine() - e.g. the EL ledger audit modal in the encashment admin review queue needs another employee's balance summary, not just the caller's own. */
     @GetMapping("/by-employee/{employeeId}")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'FINANCE_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('HR_ADMIN', 'FINANCE_ADMIN')")
     public List<LeaveEntitlementBalanceResponse> byEmployee(@PathVariable Long employeeId, @RequestParam(required = false) Integer year) {
         int resolvedYear = year != null ? year : Year.now().getValue();
         return entitlementBalanceRepository.findByEmployeeIdAndYear(employeeId, resolvedYear).stream()

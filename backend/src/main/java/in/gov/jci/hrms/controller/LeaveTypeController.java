@@ -35,7 +35,7 @@ public class LeaveTypeController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public ResponseEntity<LeaveTypeResponse> create(@Valid @RequestBody LeaveTypeRequest request) {
         LeaveTypeResponse created = leaveTypeService.create(request);
         return ResponseEntity.created(URI.create("/api/leave-types/" + created.id())).body(created);
@@ -54,13 +54,13 @@ public class LeaveTypeController {
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public LeaveTypeResponse update(@PathVariable Long id, @Valid @RequestBody LeaveTypeRequest request) {
         return leaveTypeService.update(id, request);
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public ResponseEntity<Void> delete(@PathVariable Long id) {
         leaveTypeService.delete(id);
         return ResponseEntity.noContent().build();

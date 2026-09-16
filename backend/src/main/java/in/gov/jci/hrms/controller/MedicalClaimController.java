@@ -21,7 +21,7 @@ import java.net.URI;
 
 @RestController
 @RequestMapping("/api/reimbursements/medical")
-@PreAuthorize("hasAnyRole('EMPLOYEE', 'HR_ADMIN', 'FINANCE_ADMIN', 'SUPER_ADMIN')")
+@PreAuthorize("hasAnyRole('EMPLOYEE', 'HR_ADMIN', 'FINANCE_ADMIN')")
 public class MedicalClaimController {
 
     private final MedicalClaimService medicalClaimService;
@@ -52,19 +52,19 @@ public class MedicalClaimController {
     }
 
     @PostMapping("/{id}/verify")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public MedicalClaimResponse verifyByHr(@PathVariable Long id, @Valid @RequestBody MedicalClaimVerifyRequest request) {
         return medicalClaimService.verifyByHr(id, request);
     }
 
     @PostMapping("/{id}/approve")
-    @PreAuthorize("hasAnyRole('FINANCE_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('FINANCE_ADMIN')")
     public MedicalClaimResponse approveByFinance(@PathVariable Long id, @RequestParam String approvedBy) {
         return medicalClaimService.approveByFinance(id, approvedBy);
     }
 
     @PostMapping("/{id}/reject")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'FINANCE_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('HR_ADMIN', 'FINANCE_ADMIN')")
     public MedicalClaimResponse reject(@PathVariable Long id) {
         return medicalClaimService.reject(id);
     }

@@ -35,20 +35,20 @@ public class DaRateHistoryController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public ResponseEntity<DaRateHistoryResponse> create(@Valid @RequestBody DaRateHistoryRequest request) {
         DaRateHistoryResponse created = daRateHistoryService.create(request);
         return ResponseEntity.created(URI.create("/api/da-rates/" + created.id())).body(created);
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('FINANCE_ADMIN', 'HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('FINANCE_ADMIN', 'HR_ADMIN')")
     public List<DaRateHistoryResponse> list() {
         return daRateHistoryService.list();
     }
 
     @GetMapping("/current")
-    @PreAuthorize("hasAnyRole('FINANCE_ADMIN', 'HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('FINANCE_ADMIN', 'HR_ADMIN')")
     public DaRateHistoryResponse getCurrent(@RequestParam ScaleType scaleType, @RequestParam LocalDate effectiveDate) {
         return daRateHistoryService.getCurrent(scaleType, effectiveDate);
     }

@@ -21,7 +21,7 @@ import java.util.List;
 /** Vehicle Allotment Transaction Management (Employment tab) - current and historical vehicle allotments for one employee. */
 @RestController
 @RequestMapping("/api/v1/employees/{employeeId}/vehicle-allotments")
-@PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN') or @employeeSecurity.isSelf(authentication, #employeeId)")
+@PreAuthorize("hasRole('HR_ADMIN') or @employeeSecurity.isSelf(authentication, #employeeId)")
 public class EmployeeVehicleAllotmentController {
 
     private final EmployeeVehicleAllotmentService vehicleAllotmentService;
@@ -36,7 +36,7 @@ public class EmployeeVehicleAllotmentController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public ResponseEntity<VehicleAllotmentResponse> create(@PathVariable Long employeeId,
                                                             @Valid @RequestBody VehicleAllotmentRequest request) {
         VehicleAllotmentResponse created = vehicleAllotmentService.create(employeeId, request);
@@ -45,7 +45,7 @@ public class EmployeeVehicleAllotmentController {
     }
 
     @PutMapping("/{id}/surrender")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public VehicleAllotmentResponse surrender(@PathVariable Long employeeId, @PathVariable Long id,
                                                @Valid @RequestBody VehicleAllotmentSurrenderRequest request) {
         return vehicleAllotmentService.surrender(employeeId, id, request);

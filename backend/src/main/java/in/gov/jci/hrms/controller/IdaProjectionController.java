@@ -27,7 +27,7 @@ import java.util.Map;
 
 /** CPSE IDA/CDA DA-rate-revision projection & simulation - same role set as PayrollMasterController's own class-level @PreAuthorize, since this is a payroll-masters-adjacent function. */
 @RestController
-@PreAuthorize("hasAnyRole('HR_ADMIN', 'BILL_SUPERVISOR', 'FINANCE_ADMIN', 'SUPER_ADMIN')")
+@PreAuthorize("hasAnyRole('HR_ADMIN', 'BILL_SUPERVISOR', 'FINANCE_ADMIN')")
 public class IdaProjectionController {
 
     private final IdaProjectionEngineService projectionEngineService;

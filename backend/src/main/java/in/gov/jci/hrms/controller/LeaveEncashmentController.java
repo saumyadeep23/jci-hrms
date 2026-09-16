@@ -58,21 +58,21 @@ public class LeaveEncashmentController {
     }
 
     @GetMapping("/api/v1/admin/leave/encashment")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'FINANCE_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('HR_ADMIN', 'FINANCE_ADMIN')")
     public List<LeaveEncashmentResponse> list() {
         return leaveEncashmentService.listForAdminReview();
     }
 
     /** Every encashment application for one employee, any gate status - the EL ledger modal's "under process" hold rows. */
     @GetMapping("/api/v1/admin/leave/encashment/by-employee/{employeeId}")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'FINANCE_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('HR_ADMIN', 'FINANCE_ADMIN')")
     public List<LeaveEncashmentResponse> byEmployee(@PathVariable Long employeeId) {
         return leaveEncashmentService.listByEmployee(employeeId);
     }
 
     /** Month/year-wise sanction history (HR/Finance audit) - month null or 0 returns the whole year. */
     @GetMapping("/api/v1/admin/leave/encashment/history")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'FINANCE_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('HR_ADMIN', 'FINANCE_ADMIN')")
     public List<LeaveEncashmentHistoryResponse> history(@RequestParam(required = false) Integer year,
                                                           @RequestParam(required = false) Integer month) {
         int resolvedYear = year != null ? year : Year.now().getValue();
@@ -80,14 +80,14 @@ public class LeaveEncashmentController {
     }
 
     @PatchMapping("/api/v1/admin/leave/encashment/{id}/hr-approve")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public LeaveEncashmentResponse hrApprove(@PathVariable Long id, @Valid @RequestBody EncashmentGateDecisionRequest decision,
                                               Authentication authentication) {
         return leaveEncashmentService.hrApprove(id, decision, SecurityUtils.currentEmployeeId(authentication));
     }
 
     @PatchMapping("/api/v1/admin/leave/encashment/{id}/finance-approve")
-    @PreAuthorize("hasAnyRole('FINANCE_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('FINANCE_ADMIN')")
     public LeaveEncashmentResponse financeApprove(@PathVariable Long id, @Valid @RequestBody EncashmentGateDecisionRequest decision,
                                                    Authentication authentication) {
         return leaveEncashmentService.financeApprove(id, decision, SecurityUtils.currentEmployeeId(authentication));

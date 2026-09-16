@@ -24,7 +24,7 @@ import java.util.List;
  */
 @RestController
 @RequestMapping("/api/v1/master/leave-types")
-@PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+@PreAuthorize("hasRole('HR_ADMIN')")
 public class LeaveTypeMasterController {
 
     private final LeaveTypeService leaveTypeService;

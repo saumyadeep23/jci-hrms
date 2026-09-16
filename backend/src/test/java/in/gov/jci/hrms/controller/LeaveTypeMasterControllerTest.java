@@ -70,17 +70,17 @@ class LeaveTypeMasterControllerTest {
                 .andExpect(status().isUnauthorized());
     }
 
+    // Non-financial RBAC migration (docs/security/RBAC_MIGRATION_REPORT.md): SUPER_ADMIN removed -
+    // this master-data mutation is HR_ADMIN only now.
     @Test
     @WithMockUser(roles = "SUPER_ADMIN")
-    void update_asSuperAdmin_returns200() throws Exception {
+    void update_asSuperAdmin_returns403() throws Exception {
         LeaveTypeMasterUpdateRequest request = new LeaveTypeMasterUpdateRequest(300, true, Set.of(EmploymentCategory.REGULAR));
-        when(leaveTypeService.updateMaster(eq(1L), any(LeaveTypeMasterUpdateRequest.class))).thenReturn(response());
 
         mockMvc.perform(put("/api/v1/master/leave-types/1")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value("EL"));
+                .andExpect(status().isForbidden());
     }
 
     @Test

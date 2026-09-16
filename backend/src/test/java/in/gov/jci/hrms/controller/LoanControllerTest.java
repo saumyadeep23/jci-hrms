@@ -123,6 +123,16 @@ class LoanControllerTest {
                 .andExpect(jsonPath("$.status").value("DISBURSED"));
     }
 
+    // Non-financial RBAC migration pass (docs/security/RBAC_MIGRATION_REPORT.md): this module was
+    // missed by the earlier SEC-003/004 CPF/JCIECCS closure - disburse/foreclose are checker-shaped
+    // financial actions, SUPER_ADMIN alone must not be able to reach them.
+    @Test
+    @WithMockUser(roles = "SUPER_ADMIN")
+    void disburse_withOnlySuperAdminRole_returns403() throws Exception {
+        mockMvc.perform(post("/api/loans/1/disburse"))
+                .andExpect(status().isForbidden());
+    }
+
     @Test
     void foreclose_returns200() throws Exception {
         LoanForecloseRequest request = new LoanForecloseRequest(LocalDate.of(2026, 6, 1), "REF-1");
@@ -136,6 +146,17 @@ class LoanControllerTest {
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.amount").value(6060.00));
+    }
+
+    @Test
+    @WithMockUser(roles = "SUPER_ADMIN")
+    void foreclose_withOnlySuperAdminRole_returns403() throws Exception {
+        LoanForecloseRequest request = new LoanForecloseRequest(LocalDate.of(2026, 6, 1), "REF-1");
+
+        mockMvc.perform(post("/api/loans/1/foreclose")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isForbidden());
     }
 
     @Test

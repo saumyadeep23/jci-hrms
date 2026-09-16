@@ -29,26 +29,26 @@ public class EmployeeDependentController {
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN') or @employeeSecurity.isSelf(authentication, #employeeId)")
+    @PreAuthorize("hasRole('HR_ADMIN') or @employeeSecurity.isSelf(authentication, #employeeId)")
     public List<DependentResponse> list(@PathVariable Long employeeId) {
         return dependentService.listByEmployee(employeeId);
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public ResponseEntity<DependentResponse> create(@PathVariable Long employeeId, @Valid @RequestBody DependentRequest request) {
         DependentResponse created = dependentService.create(employeeId, request);
         return ResponseEntity.created(URI.create("/api/employees/" + employeeId + "/dependents/" + created.id())).body(created);
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public DependentResponse update(@PathVariable Long employeeId, @PathVariable Long id, @Valid @RequestBody DependentRequest request) {
         return dependentService.update(employeeId, id, request);
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public ResponseEntity<Void> delete(@PathVariable Long employeeId, @PathVariable Long id) {
         dependentService.delete(employeeId, id);
         return ResponseEntity.noContent().build();

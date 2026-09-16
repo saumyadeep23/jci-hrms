@@ -56,39 +56,39 @@ public class CeaClaimController {
     }
 
     @GetMapping("/api/v1/admin/cea-claims/pending-verification")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public List<CeaClaimResponse> pendingVerification() {
         return ceaClaimService.pendingVerification();
     }
 
     @PutMapping("/api/v1/admin/cea-claims/{id}/verify")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public CeaClaimResponse verify(@PathVariable Long id, @Valid @RequestBody CeaClaimVerifyRequest request, Authentication authentication) {
         return ceaClaimService.verifyClaim(id, requireCurrentEmployeeId(authentication), request);
     }
 
     @GetMapping("/api/v1/admin/cea-claims/pending-bill-passing")
-    @PreAuthorize("hasAnyRole('FINANCE_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('FINANCE_ADMIN')")
     public List<CeaClaimResponse> pendingBillPassing() {
         return ceaClaimService.pendingBillPassing();
     }
 
     /** HR/Finance History &amp; Log view - every claim regardless of status, both gates can see the full audit trail. */
     @GetMapping("/api/v1/admin/cea-claims")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'FINANCE_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('HR_ADMIN', 'FINANCE_ADMIN')")
     public List<CeaClaimResponse> listAll() {
         return ceaClaimService.listAll();
     }
 
     @PutMapping("/api/v1/admin/cea-claims/{id}/pass-bill")
-    @PreAuthorize("hasAnyRole('FINANCE_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('FINANCE_ADMIN')")
     public CeaClaimResponse passBill(@PathVariable Long id, @Valid @RequestBody CeaClaimBillPassRequest request, Authentication authentication) {
         return ceaClaimService.passBill(id, requireCurrentEmployeeId(authentication), request);
     }
 
     /** Either gate (HR at SUBMITTED, Finance at VERIFIED) may reject - CeaClaimService.rejectClaim() itself enforces which statuses are actually rejectable. */
     @PutMapping("/api/v1/admin/cea-claims/{id}/reject")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'FINANCE_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('HR_ADMIN', 'FINANCE_ADMIN')")
     public CeaClaimResponse reject(@PathVariable Long id, @Valid @RequestBody CeaClaimRejectRequest request) {
         return ceaClaimService.rejectClaim(id, request.reason());
     }

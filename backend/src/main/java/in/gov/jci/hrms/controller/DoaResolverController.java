@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.RestController;
 /** PIMS ALMS Phase 2, Section 6 - diagnostic/admin lookup for the DOA Dynamic Resolver, independent of any particular submit flow. */
 @RestController
 @RequestMapping("/api/v1/admin/doa")
-@PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+@PreAuthorize("hasRole('HR_ADMIN')")
 public class DoaResolverController {
 
     private final DoaResolverService doaResolverService;

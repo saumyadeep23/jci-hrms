@@ -59,13 +59,13 @@ public class MobilePunchController {
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public MobilePunchResponse getById(@PathVariable Long id) {
         return mobilePunchService.getById(id);
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public Page<MobilePunchResponse> list(Pageable pageable) {
         return mobilePunchService.list(pageable);
     }

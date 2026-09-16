@@ -46,13 +46,13 @@ public class RegisteredDeviceController {
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public List<RegisteredDeviceResponse> listAll() {
         return registeredDeviceService.listAll();
     }
 
     @PatchMapping("/{id}/status")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public RegisteredDeviceResponse updateStatus(@PathVariable Long id, @Valid @RequestBody DeviceStatusUpdateRequest request,
                                                    Authentication authentication) {
         return registeredDeviceService.updateStatus(id, request, currentEmployeeId(authentication));

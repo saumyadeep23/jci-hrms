@@ -33,64 +33,64 @@ public class AparController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public ResponseEntity<EmployeeAparResponse> initiate(@Valid @RequestBody EmployeeAparRequest request) {
         EmployeeAparResponse created = aparService.initiate(request);
         return ResponseEntity.created(URI.create("/api/apar/" + created.id())).body(created);
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN') or @aparSec.isParticipant(authentication, #id)")
+    @PreAuthorize("hasRole('HR_ADMIN') or @aparSec.isParticipant(authentication, #id)")
     public EmployeeAparResponse getById(@PathVariable Long id) {
         return aparService.getById(id);
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public Page<EmployeeAparResponse> list(Pageable pageable) {
         return aparService.list(pageable);
     }
 
     @PostMapping("/{id}/self-appraisal")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN') or @aparSec.isSelf(authentication, #id)")
+    @PreAuthorize("hasRole('HR_ADMIN') or @aparSec.isSelf(authentication, #id)")
     public EmployeeAparResponse submitSelfAppraisal(@PathVariable Long id, @Valid @RequestBody SelfAppraisalRequest request) {
         return aparService.submitSelfAppraisal(id, request);
     }
 
     @PostMapping("/{id}/reporting-assessment")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN') or @aparSec.isReportingOfficer(authentication, #id)")
+    @PreAuthorize("hasRole('HR_ADMIN') or @aparSec.isReportingOfficer(authentication, #id)")
     public EmployeeAparResponse submitReportingAssessment(@PathVariable Long id,
                                                             @Valid @RequestBody ReportingAssessmentRequest request) {
         return aparService.submitReportingAssessment(id, request);
     }
 
     @PostMapping("/{id}/reviewing-assessment")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN') or @aparSec.isReviewingOfficer(authentication, #id)")
+    @PreAuthorize("hasRole('HR_ADMIN') or @aparSec.isReviewingOfficer(authentication, #id)")
     public EmployeeAparResponse submitReviewingAssessment(@PathVariable Long id,
                                                             @Valid @RequestBody ReviewingAssessmentRequest request) {
         return aparService.submitReviewingAssessment(id, request);
     }
 
     @PostMapping("/{id}/accept")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN') or @aparSec.isAcceptingAuthority(authentication, #id)")
+    @PreAuthorize("hasRole('HR_ADMIN') or @aparSec.isAcceptingAuthority(authentication, #id)")
     public EmployeeAparResponse accept(@PathVariable Long id, @Valid @RequestBody AparAcceptRequest request) {
         return aparService.accept(id, request);
     }
 
     @PostMapping("/{id}/disclose")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public EmployeeAparResponse disclose(@PathVariable Long id) {
         return aparService.disclose(id);
     }
 
     @PostMapping("/{id}/representation")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN') or @aparSec.isSelf(authentication, #id)")
+    @PreAuthorize("hasRole('HR_ADMIN') or @aparSec.isSelf(authentication, #id)")
     public EmployeeAparResponse submitRepresentation(@PathVariable Long id, @Valid @RequestBody RepresentationRequest request) {
         return aparService.submitRepresentation(id, request);
     }
 
     @PostMapping("/{id}/finalize")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public EmployeeAparResponse finalizeApar(@PathVariable Long id) {
         return aparService.finalizeApar(id);
     }

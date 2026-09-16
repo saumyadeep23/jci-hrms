@@ -27,7 +27,7 @@ import java.net.URI;
 
 @RestController
 @RequestMapping({"/api/regional-offices", "/api/v1/admin/masters/regional-offices", "/api/v1/master/ro", "/api/v1/offices"})
-@PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+@PreAuthorize("hasRole('HR_ADMIN')")
 public class RegionalOfficeController {
 
     private final RegionalOfficeService regionalOfficeService;

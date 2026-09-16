@@ -49,26 +49,26 @@ public class HolidayMasterController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public ResponseEntity<List<HolidayMasterRow>> create(@Valid @RequestBody HolidayMasterCreateRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(holidayMasterService.create(request));
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public HolidayMasterRow update(@PathVariable Long id, @Valid @RequestBody HolidayMasterUpdateRequest request) {
         return holidayMasterService.update(id, request);
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public ResponseEntity<Void> delete(@PathVariable Long id) {
         holidayMasterService.delete(id);
         return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/bulk-upload")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public HolidayBulkUploadResult bulkUpload(@RequestPart("file") MultipartFile file) {
         return holidayMasterService.bulkUpload(file);
     }

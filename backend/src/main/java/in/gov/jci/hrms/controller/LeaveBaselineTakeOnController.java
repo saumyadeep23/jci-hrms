@@ -16,12 +16,12 @@ import org.springframework.web.bind.annotation.RestController;
  * PIMS ALMS Phase 2, Section 1. "HR_SUPER_ADMIN" (as named in the spec) does
  * not exist as a role anywhere in this codebase - roles are opaque JWT
  * strings, and the established convention for this class of admin-only
- * leave/attendance endpoint is hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')
+ * leave/attendance endpoint is hasRole('HR_ADMIN')
  * (see e.g. RegionalOfficeController, DpcController), reused here.
  */
 @RestController
 @RequestMapping("/api/v1/admin/leave/baseline-takeon")
-@PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+@PreAuthorize("hasRole('HR_ADMIN')")
 public class LeaveBaselineTakeOnController {
 
     private final LeaveBaselineTakeOnService baselineTakeOnService;

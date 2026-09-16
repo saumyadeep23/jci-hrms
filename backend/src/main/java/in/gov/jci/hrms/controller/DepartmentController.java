@@ -30,7 +30,7 @@ import java.net.URI;
  */
 @RestController
 @RequestMapping({"/api/departments", "/api/v1/admin/masters/departments", "/api/v1/departments"})
-@PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+@PreAuthorize("hasRole('HR_ADMIN')")
 public class DepartmentController {
 
     private final DepartmentService departmentService;

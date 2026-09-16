@@ -27,7 +27,7 @@ import java.net.URI;
 
 @RestController
 @RequestMapping({"/api/dpcs", "/api/v1/admin/masters/dpcs", "/api/v1/master/dpc"})
-@PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+@PreAuthorize("hasRole('HR_ADMIN')")
 public class DpcController {
 
     private final DpcService dpcService;

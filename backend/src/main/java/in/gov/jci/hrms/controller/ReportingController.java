@@ -23,7 +23,7 @@ public class ReportingController {
     }
 
     @GetMapping("/payroll/{payrollRunId}/bank-file")
-    @PreAuthorize("hasAnyRole('FINANCE_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('FINANCE_ADMIN')")
     public ResponseEntity<String> bankDisbursementFile(@PathVariable Long payrollRunId) {
         String csv = payrollReportingService.generateBankDisbursementFile(payrollRunId);
         ContentDisposition disposition = ContentDisposition.attachment()
@@ -36,7 +36,7 @@ public class ReportingController {
     }
 
     @GetMapping("/payroll/{payrollRunId}/payslip/{employeeId}")
-    @PreAuthorize("hasAnyRole('FINANCE_ADMIN', 'SUPER_ADMIN') or @employeeSecurity.isSelf(authentication, #employeeId)")
+    @PreAuthorize("hasRole('FINANCE_ADMIN') or @employeeSecurity.isSelf(authentication, #employeeId)")
     public PayslipSummaryResponse payslipSummary(@PathVariable Long payrollRunId, @PathVariable Long employeeId) {
         return payrollReportingService.getPayslipSummary(payrollRunId, employeeId);
     }

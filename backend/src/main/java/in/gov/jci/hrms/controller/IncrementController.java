@@ -19,7 +19,7 @@ import java.util.List;
 /** PIMS_SPEC.md dashboard card 5 (Career & Service Book) - Monthly Increment (3% IDA). */
 @RestController
 @RequestMapping("/api/v1/increments")
-@PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+@PreAuthorize("hasRole('HR_ADMIN')")
 public class IncrementController {
 
     private final IncrementProcessingService incrementProcessingService;

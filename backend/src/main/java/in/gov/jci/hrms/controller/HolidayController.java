@@ -42,7 +42,7 @@ public class HolidayController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public ResponseEntity<HolidayResponse> create(@Valid @RequestBody HolidayRequest request) {
         HolidayResponse created = holidayService.create(request);
         return ResponseEntity.created(URI.create("/api/holidays/" + created.id())).body(created);
@@ -95,13 +95,13 @@ public class HolidayController {
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public HolidayResponse update(@PathVariable Long id, @Valid @RequestBody HolidayRequest request) {
         return holidayService.update(id, request);
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public ResponseEntity<Void> delete(@PathVariable Long id) {
         holidayService.delete(id);
         return ResponseEntity.noContent().build();

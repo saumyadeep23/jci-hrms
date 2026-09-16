@@ -33,7 +33,7 @@ import java.util.List;
 /** PIMS_SPEC.md Feature 2 (Sanctioned Seat Inventory) / Section 2 (admin GUI). */
 @RestController
 @RequestMapping("/api/v1/posts")
-@PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+@PreAuthorize("hasRole('HR_ADMIN')")
 public class PostMasterController {
 
     private final PostMasterService postMasterService;

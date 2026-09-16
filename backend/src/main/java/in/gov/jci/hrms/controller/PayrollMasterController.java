@@ -113,8 +113,15 @@ public class PayrollMasterController {
         return payrollMasterService.listSalaryHeads();
     }
 
+    // Non-financial RBAC migration (docs/security/RBAC_MIGRATION_REPORT.md): SUPER_ADMIN removed per
+    // confirmed direction ("SYSTEM_ADMIN must not be an alternate functional approver for payroll/
+    // statutory financial master changes merely because it is the technical administrator").
+    // REQUIRES_BUSINESS_CONFIRMATION: the existing permission matrix's HR_ADMIN_BILL/HR_MAKER_BILL
+    // roles carry only PAYROLL_VIEW/PREPARE/FINALIZE/REVERSE - no permission for editing salary-head/
+    // statutory-head master data is seeded, so HR_ADMIN (the class-level's own read/write default role)
+    // is retained here as the only currently-known authority rather than guessing HR_ADMIN_BILL applies.
     @PutMapping("/salary-heads/{headCount}")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public SalaryHeadResponse updateSalaryHead(@PathVariable Integer headCount, @Valid @RequestBody SalaryHeadUpdateRequest request) {
         return payrollMasterService.updateSalaryHead(headCount, request);
     }
@@ -125,7 +132,7 @@ public class PayrollMasterController {
     }
 
     @PutMapping("/statutory-heads/{statHeadCount}")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public StatutoryHeadResponse updateStatutoryHead(@PathVariable Integer statHeadCount,
                                                       @Valid @RequestBody StatutoryHeadUpdateRequest request) {
         return payrollMasterService.updateStatutoryHead(statHeadCount, request);
@@ -155,8 +162,10 @@ public class PayrollMasterController {
         return payrollStatutoryParameterService.listCurrent();
     }
 
+    // REQUIRES_BUSINESS_CONFIRMATION (same reasoning as updateSalaryHead/updateStatutoryHead above) -
+    // HR_ADMIN/FINANCE_ADMIN (the two roles already present) retained, SUPER_ADMIN removed.
     @PostMapping("/statutory-parameters/{paramKey}/revise")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN', 'FINANCE_ADMIN')")
+    @PreAuthorize("hasAnyRole('HR_ADMIN', 'FINANCE_ADMIN')")
     public StatutoryParameterResponse reviseStatutoryParameter(@PathVariable String paramKey,
                                                                 @Valid @RequestBody StatutoryParameterReviseRequest request) {
         return payrollStatutoryParameterService.revise(paramKey, request);

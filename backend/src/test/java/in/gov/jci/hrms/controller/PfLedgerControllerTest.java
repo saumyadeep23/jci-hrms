@@ -130,4 +130,14 @@ class PfLedgerControllerTest {
         mockMvc.perform(post("/api/cpf-ledger/diversions/10/settle"))
                 .andExpect(status().isForbidden());
     }
+
+    // Non-financial RBAC migration pass (docs/security/RBAC_MIGRATION_REPORT.md): this module was
+    // missed by the earlier SEC-003/004 CPF/JCIECCS closure - settle is a checker-shaped financial
+    // action, SUPER_ADMIN alone must not be able to reach it.
+    @Test
+    @WithMockUser(roles = "SUPER_ADMIN")
+    void settle_withOnlySuperAdminRole_returns403() throws Exception {
+        mockMvc.perform(post("/api/cpf-ledger/diversions/10/settle"))
+                .andExpect(status().isForbidden());
+    }
 }

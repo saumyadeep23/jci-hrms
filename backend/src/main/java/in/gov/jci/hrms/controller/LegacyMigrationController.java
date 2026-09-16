@@ -22,7 +22,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/legacy-migration")
-@PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+@PreAuthorize("hasRole('HR_ADMIN')")
 public class LegacyMigrationController {
 
     private final LegacyMigrationService legacyMigrationService;
@@ -62,7 +62,7 @@ public class LegacyMigrationController {
     }
 
     @GetMapping("/salary-history/{employeeId}")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN') or @employeeSecurity.isSelf(authentication, #employeeId)")
+    @PreAuthorize("hasRole('HR_ADMIN') or @employeeSecurity.isSelf(authentication, #employeeId)")
     public List<SalaryHistoryEntryResponse> salaryHistory(@PathVariable Long employeeId) {
         return legacyMigrationService.getSalaryHistory(employeeId);
     }

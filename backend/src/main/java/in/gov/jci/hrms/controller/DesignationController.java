@@ -24,7 +24,7 @@ import java.net.URI;
 
 @RestController
 @RequestMapping({"/api/designations", "/api/v1/admin/masters/designations"})
-@PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+@PreAuthorize("hasRole('HR_ADMIN')")
 public class DesignationController {
 
     private final DesignationService designationService;

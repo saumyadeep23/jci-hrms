@@ -73,19 +73,19 @@ public class MovementLifecycleController {
     // ---- Tab 1: Movement Orders ----
 
     @PostMapping("/orders")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public ResponseEntity<EmployeeMovementRecordResponse> createOrder(@Valid @RequestBody MovementOrderCreateRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(movementOrderService.create(request));
     }
 
     @GetMapping("/records")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public Page<EmployeeMovementRecordResponse> list(Pageable pageable) {
         return movementOrderService.list(pageable);
     }
 
     @GetMapping("/records/{id}")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public EmployeeMovementRecordResponse getById(@PathVariable Long id) {
         return movementOrderService.getById(id);
     }
@@ -102,7 +102,7 @@ public class MovementLifecycleController {
 
     /** Transfer or Promotion Order PDF (dispatched by order type) - Tab 1's "Download Order PDF" button. */
     @GetMapping("/orders/{orderId}/pdf")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public ResponseEntity<byte[]> orderPdf(@PathVariable Long orderId) {
         return pdfResponse(movementOrderService.generateOrderPdf(orderId), "Movement_Order_" + orderId + ".pdf");
     }
@@ -118,20 +118,20 @@ public class MovementLifecycleController {
     // ---- Tab 2: Pending Releases ----
 
     @GetMapping("/records/pending-release")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public List<EmployeeMovementRecordResponse> pendingReleases() {
         return joiningReportService.pendingReleases();
     }
 
     @PatchMapping("/records/{id}/release")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public EmployeeMovementRecordResponse release(@PathVariable Long id, @Valid @RequestBody MovementReleaseRequest request) {
         return joiningReportService.release(id, request);
     }
 
     /** Release Order PDF - Tab 2's "Download Release Order PDF" button. */
     @GetMapping("/records/{id}/release/pdf")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public ResponseEntity<byte[]> releasePdf(@PathVariable Long id) {
         return pdfResponse(joiningReportService.generateReleasePdf(id), "Release_Order_" + id + ".pdf");
     }
@@ -147,13 +147,13 @@ public class MovementLifecycleController {
     // ---- Tab 3: Joining Verifications ----
 
     @GetMapping("/records/pending-joining")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public List<EmployeeMovementRecordResponse> pendingJoiningVerifications() {
         return joiningReportService.pendingJoiningVerifications();
     }
 
     @PostMapping("/records/{id}/joining-report")
-    @PreAuthorize("hasAnyRole('EMPLOYEE', 'HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('EMPLOYEE', 'HR_ADMIN')")
     public EmployeeMovementRecordResponse submitJoiningReport(@PathVariable Long id, @Valid @RequestBody JoiningReportRequest request,
                                                                 Authentication authentication, HttpServletRequest httpRequest) {
         Long employeeId = SecurityUtils.currentEmployeeId(authentication);
@@ -161,7 +161,7 @@ public class MovementLifecycleController {
     }
 
     @PostMapping("/records/{id}/joining-report/decision")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public EmployeeMovementRecordResponse decide(@PathVariable Long id, @Valid @RequestBody JoiningDecisionRequest decision,
                                                    Authentication authentication) {
         Long approverEmployeeId = SecurityUtils.currentEmployeeId(authentication);
@@ -170,7 +170,7 @@ public class MovementLifecycleController {
 
     /** "Seek Clarification" - sends a PENDING_VERIFICATION joining report back to the employee for amendment. */
     @PostMapping("/records/{id}/joining-report/request-clarification")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public EmployeeMovementRecordResponse requestClarification(@PathVariable Long id, @Valid @RequestBody ClarificationRequest request,
                                                                   Authentication authentication) {
         Long supervisorEmployeeId = SecurityUtils.currentEmployeeId(authentication);
@@ -179,7 +179,7 @@ public class MovementLifecycleController {
 
     /** ESS: "Amend & Re-submit Report" after a CLARIFICATION_REQUESTED return. */
     @PutMapping("/records/{id}/joining-report/resubmit")
-    @PreAuthorize("hasAnyRole('EMPLOYEE', 'HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('EMPLOYEE', 'HR_ADMIN')")
     public EmployeeMovementRecordResponse resubmitJoiningReport(@PathVariable Long id, @Valid @RequestBody JoiningReportRequest request,
                                                                    Authentication authentication, HttpServletRequest httpRequest) {
         Long employeeId = SecurityUtils.currentEmployeeId(authentication);
@@ -189,26 +189,26 @@ public class MovementLifecycleController {
     // ---- Tab 4: Payroll & LPC Clearance ----
 
     @GetMapping("/payroll-inputs")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'FINANCE_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('HR_ADMIN', 'FINANCE_ADMIN')")
     public List<PayrollMovementInputResponse> payrollInputsForMonth(@RequestParam int year, @RequestParam int month) {
         return payrollMovementIntegrationService.forMonth(year, month);
     }
 
     @GetMapping("/records/{id}/payroll-inputs")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'FINANCE_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('HR_ADMIN', 'FINANCE_ADMIN')")
     public List<PayrollMovementInputResponse> payrollInputsForMovement(@PathVariable Long id) {
         return payrollMovementIntegrationService.forMovement(id);
     }
 
     @PostMapping("/records/{id}/lpc/accept")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'FINANCE_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('HR_ADMIN', 'FINANCE_ADMIN')")
     public EmployeeMovementRecordResponse acceptLpc(@PathVariable Long id) {
         return joiningReportService.acceptLpc(id);
     }
 
     /** "Generate / Download LPC" - idempotent: computes and persists the certificate on first call, just re-renders it on later calls. */
     @GetMapping("/records/{id}/lpc/pdf")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'FINANCE_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('HR_ADMIN', 'FINANCE_ADMIN')")
     public ResponseEntity<byte[]> lpcPdf(@PathVariable Long id, Authentication authentication) {
         Long generatedBy = SecurityUtils.currentEmployeeId(authentication);
         return pdfResponse(lastPayCertificateService.generatePdf(id, generatedBy), "LPC_" + id + ".pdf");

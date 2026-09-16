@@ -21,7 +21,7 @@ public class ServiceBookController {
     }
 
     @GetMapping("/{employeeId}/timeline")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN') or @employeeSecurity.isSelf(authentication, #employeeId)")
+    @PreAuthorize("hasRole('HR_ADMIN') or @employeeSecurity.isSelf(authentication, #employeeId)")
     public List<ServiceBookEventResponse> timeline(@PathVariable Long employeeId) {
         return legacyMigrationService.getServiceBookTimeline(employeeId);
     }

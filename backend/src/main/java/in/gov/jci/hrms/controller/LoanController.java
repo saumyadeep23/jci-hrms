@@ -51,12 +51,20 @@ public class LoanController {
         return loanService.list(pageable);
     }
 
+    // Non-financial RBAC migration pass (docs/security/RBAC_MIGRATION_REPORT.md): this general employee
+    // loan module was missed by the earlier SEC-003/004 CPF/JCIECCS closure - disburse/foreclose are
+    // checker-shaped financial actions, so SUPER_ADMIN is removed here too, narrowed off the class-level
+    // grant. No maker != checker enforcement exists in LoanService for this module (unlike
+    // CpfLoanApplicationService's requireDifferentFromApplicant) - adding that is a business-workflow
+    // change out of this authorization-only task's scope, not attempted here.
     @PostMapping("/{id}/disburse")
+    @PreAuthorize("hasAnyRole('FINANCE_ADMIN', 'CPF_ADMIN', 'COOP_ADMIN')")
     public EmployeeLoanResponse disburse(@PathVariable Long id) {
         return loanService.disburse(id);
     }
 
     @PostMapping("/{id}/foreclose")
+    @PreAuthorize("hasAnyRole('FINANCE_ADMIN', 'CPF_ADMIN', 'COOP_ADMIN')")
     public LoanRepaymentResponse foreclose(@PathVariable Long id, @Valid @RequestBody LoanForecloseRequest request) {
         return loanService.foreclose(id, request);
     }

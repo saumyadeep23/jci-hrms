@@ -29,26 +29,26 @@ public class EmployeeNomineeController {
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN') or @employeeSecurity.isSelf(authentication, #employeeId)")
+    @PreAuthorize("hasRole('HR_ADMIN') or @employeeSecurity.isSelf(authentication, #employeeId)")
     public List<NomineeResponse> list(@PathVariable Long employeeId) {
         return nomineeService.listByEmployee(employeeId);
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public ResponseEntity<NomineeResponse> create(@PathVariable Long employeeId, @Valid @RequestBody NomineeRequest request) {
         NomineeResponse created = nomineeService.create(employeeId, request);
         return ResponseEntity.created(URI.create("/api/employees/" + employeeId + "/nominees/" + created.id())).body(created);
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public NomineeResponse update(@PathVariable Long employeeId, @PathVariable Long id, @Valid @RequestBody NomineeRequest request) {
         return nomineeService.update(employeeId, id, request);
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public ResponseEntity<Void> delete(@PathVariable Long employeeId, @PathVariable Long id) {
         nomineeService.delete(employeeId, id);
         return ResponseEntity.noContent().build();

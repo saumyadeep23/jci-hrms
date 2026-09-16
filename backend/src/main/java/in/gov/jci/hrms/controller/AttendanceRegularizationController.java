@@ -108,7 +108,7 @@ public class AttendanceRegularizationController {
 
     /** HR_ADMIN/SUPER_ADMIN organization-wide visibility - every regularization request, any status, regardless of designated approver. View-only: PATCH .../approve still requires being the actual designated approver on that request. */
     @GetMapping("/all")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public List<AttendanceRegularizationResponse> all() {
         return attendanceRegularizationService.findAll();
     }

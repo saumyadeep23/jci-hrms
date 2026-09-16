@@ -24,14 +24,14 @@ public class EmployeeSocialProfileController {
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN') or @employeeSecurity.isSelf(authentication, #employeeId)")
+    @PreAuthorize("hasRole('HR_ADMIN') or @employeeSecurity.isSelf(authentication, #employeeId)")
     public ResponseEntity<SocialProfileResponse> get(@PathVariable Long employeeId) {
         SocialProfileResponse response = socialProfileService.getByEmployee(employeeId);
         return response != null ? ResponseEntity.ok(response) : ResponseEntity.noContent().build();
     }
 
     @PutMapping
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public SocialProfileResponse upsert(@PathVariable Long employeeId, @Valid @RequestBody SocialProfileRequest request) {
         return socialProfileService.upsert(employeeId, request);
     }

@@ -16,7 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 /** CONTRACTUAL/OUTSOURCED contract & deployment renewal (V50) - see ContractRenewalService's javadoc. */
 @RestController
 @RequestMapping("/api/v1/employees/{id}")
-@PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+@PreAuthorize("hasRole('HR_ADMIN')")
 public class ContractRenewalController {
 
     private final ContractRenewalService contractRenewalService;

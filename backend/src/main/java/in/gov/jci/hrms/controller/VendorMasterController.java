@@ -25,7 +25,7 @@ import java.net.URI;
 /** PIMS_SPEC.md Section 1.A.7 (Manpower Vendors) and Section 6 admin-console route table. */
 @RestController
 @RequestMapping({"/api/vendors", "/api/v1/admin/masters/vendors"})
-@PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+@PreAuthorize("hasRole('HR_ADMIN')")
 public class VendorMasterController {
 
     private final VendorMasterService vendorMasterService;

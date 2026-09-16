@@ -36,7 +36,7 @@ import java.util.List;
  */
 @RestController
 @RequestMapping("/api/v1/reports/alms")
-@PreAuthorize("hasAnyRole('HR_ADMIN', 'FINANCE_ADMIN', 'SUPER_ADMIN')")
+@PreAuthorize("hasAnyRole('HR_ADMIN', 'FINANCE_ADMIN')")
 public class AlmsReportController {
 
     private final AlmsReportService almsReportService;

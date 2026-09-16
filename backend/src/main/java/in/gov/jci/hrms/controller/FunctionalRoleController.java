@@ -50,14 +50,14 @@ public class FunctionalRoleController {
     }
 
     @PostMapping("/assignments")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public ResponseEntity<FunctionalRoleAssignmentResponse> assign(@Valid @RequestBody FunctionalRoleAssignmentRequest request) {
         FunctionalRoleAssignmentResponse created = functionalRoleAssignmentService.create(request);
         return ResponseEntity.created(URI.create("/api/v1/master/functional-roles/assignments/" + created.id())).body(created);
     }
 
     @PatchMapping("/assignments/{id}/relieve")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public FunctionalRoleAssignmentResponse relieve(@PathVariable UUID id,
                                                       @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate validTo) {
         return functionalRoleAssignmentService.relieve(id, validTo != null ? validTo : LocalDate.now());

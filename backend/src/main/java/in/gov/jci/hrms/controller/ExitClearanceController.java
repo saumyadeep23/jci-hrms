@@ -36,7 +36,7 @@ public class ExitClearanceController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public ResponseEntity<ExitClearanceRequestResponse> initiate(@Valid @RequestBody ExitClearanceInitiateRequest request) {
         ExitClearanceRequest created = exitClearanceService.initiateExit(
                 request.employeeId(), request.separationType(), request.targetReleaseDate(), request.remarks());
@@ -44,14 +44,14 @@ public class ExitClearanceController {
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public ExitClearanceRequestResponse getById(@PathVariable Long id) {
         return toResponse(exitClearanceService.getRequest(id));
     }
 
     /** 404 (not an empty body) when the employee has no exit clearance request yet - lets the frontend distinguish "none yet" from "loading". */
     @GetMapping("/by-employee/{employeeId}")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public ExitClearanceRequestResponse getLatestForEmployee(@PathVariable Long employeeId) {
         return exitClearanceService.findLatestForEmployee(employeeId)
                 .map(this::toResponse)
@@ -59,13 +59,13 @@ public class ExitClearanceController {
     }
 
     @GetMapping("/{id}/checklist")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public List<ExitClearanceItemResponse> checklist(@PathVariable Long id) {
         return exitClearanceService.checklist(id).stream().map(ExitClearanceItemResponse::from).toList();
     }
 
     @PutMapping("/items/{itemId}")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public ExitClearanceItemResponse updateClearanceItem(@PathVariable Long itemId,
                                                           @Valid @RequestBody ExitClearanceItemUpdateRequest request,
                                                           Authentication authentication) {
@@ -75,7 +75,7 @@ public class ExitClearanceController {
     }
 
     @PostMapping("/{id}/finalize")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public ExitClearanceRequestResponse finalizeReleaseOrder(@PathVariable Long id, @Valid @RequestBody ExitClearanceFinalizeRequest request) {
         return toResponse(exitClearanceService.finalizeReleaseOrder(id, request.releaseOrderRefNo(), request.releaseOrderDate()));
     }

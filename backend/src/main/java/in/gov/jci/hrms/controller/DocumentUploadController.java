@@ -20,7 +20,7 @@ import java.time.Instant;
 /** PIMS_SPEC.md Section 3.B. */
 @RestController
 @RequestMapping("/api/v1/documents")
-@PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN', 'EMPLOYEE')")
+@PreAuthorize("hasAnyRole('HR_ADMIN', 'EMPLOYEE')")
 public class DocumentUploadController {
 
     private final DocumentUploadService documentUploadService;

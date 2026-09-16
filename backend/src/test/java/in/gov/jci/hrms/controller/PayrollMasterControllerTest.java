@@ -205,4 +205,20 @@ class PayrollMasterControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.effectiveTo").value("2026-12-31"));
     }
+
+    // Non-financial RBAC migration (docs/security/RBAC_MIGRATION_REPORT.md): SUPER_ADMIN must not be an
+    // alternate approver for statutory/payroll master-data changes merely because it is the technical
+    // administrator - REQUIRES_BUSINESS_CONFIRMATION on the exact final owning role, but the SUPER_ADMIN
+    // bypass itself is closed regardless.
+    @Test
+    @WithMockUser(roles = "SUPER_ADMIN")
+    void updateSalaryHead_withOnlySuperAdminRole_returns403() throws Exception {
+        in.gov.jci.hrms.dto.SalaryHeadUpdateRequest request = new in.gov.jci.hrms.dto.SalaryHeadUpdateRequest(
+                "Basic Pay", "BASIC", in.gov.jci.hrms.entity.SalaryHeadEffectType.EARNING, false, "BOTH", 1, true, "1000");
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/v1/payroll/masters/salary-heads/1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isForbidden());
+    }
 }

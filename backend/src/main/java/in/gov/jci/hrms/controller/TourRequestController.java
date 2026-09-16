@@ -19,7 +19,7 @@ import java.net.URI;
 
 @RestController
 @RequestMapping("/api/reimbursements/tours")
-@PreAuthorize("hasAnyRole('EMPLOYEE', 'HR_ADMIN', 'FINANCE_ADMIN', 'SUPER_ADMIN')")
+@PreAuthorize("hasAnyRole('EMPLOYEE', 'HR_ADMIN', 'FINANCE_ADMIN')")
 public class TourRequestController {
 
     private final TourRequestService tourRequestService;

@@ -60,7 +60,7 @@ public class EmployeeController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public ResponseEntity<EmployeeResponse> create(@Valid @RequestBody EmployeeRequest request) {
         EmployeeResponse created = employeeService.create(request);
         return ResponseEntity.created(URI.create("/api/employees/" + created.id())).body(created);
@@ -73,13 +73,13 @@ public class EmployeeController {
      * go stale between fetch and submit without causing a collision.
      */
     @GetMapping("/next-cpf-ac-no")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public ResponseEntity<Map<String, String>> getNextCpfAcNo() {
         return ResponseEntity.ok(Map.of("nextCpfAcNo", employeeService.generateNextCpfAcNo()));
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN') or @employeeSecurity.isSelf(authentication, #id)")
+    @PreAuthorize("hasRole('HR_ADMIN') or @employeeSecurity.isSelf(authentication, #id)")
     public EmployeeResponse getById(@PathVariable Long id) {
         return employeeService.getById(id);
     }
@@ -92,7 +92,7 @@ public class EmployeeController {
      */
     /** Widened to CPF_ADMIN/FINANCE_ADMIN: the CPF Trust module's employee pickers (Incoming Transfers, Loan Origination) need to search/resolve an employee by code or name, and those roles already see full employee-level CPF ledger/withdrawal data elsewhere in this same module (PfLedgerController, CpfTrustController). */
     @GetMapping
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'CPF_ADMIN', 'FINANCE_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('HR_ADMIN', 'CPF_ADMIN', 'FINANCE_ADMIN')")
     public Page<EmployeeResponse> list(@RequestParam(required = false) String search,
                                         @RequestParam(required = false) Long roId,
                                         @RequestParam(required = false) Long designationId,
@@ -105,7 +105,7 @@ public class EmployeeController {
 
     /** PIMS "Separated Staff" tab - richer than the plain status=SEPARATED filter on the main list() above (which returns the ordinary EmployeeResponse shape); this one joins in clearance/settlement/last-post details. */
     @GetMapping("/separated")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public Page<SeparatedEmployeeResponse> separated(@RequestParam(required = false) String status,
                                                        @RequestParam(required = false) String search,
                                                        @PageableDefault(size = 15) Pageable pageable) {
@@ -114,20 +114,20 @@ public class EmployeeController {
 
     /** PIMS_SPEC.md reporting-hub drill-through: the Employee 360 profile drawer. */
     @GetMapping("/{id}/360")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN') or @employeeSecurity.isSelf(authentication, #id)")
+    @PreAuthorize("hasRole('HR_ADMIN') or @employeeSecurity.isSelf(authentication, #id)")
     public Employee360Response get360(@PathVariable Long id) {
         return employee360Service.getById(id);
     }
 
     /** Digital Service Book Career Event Logger (operational-features task, Section 3). */
     @GetMapping("/{id}/service-book")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN') or @employeeSecurity.isSelf(authentication, #id)")
+    @PreAuthorize("hasRole('HR_ADMIN') or @employeeSecurity.isSelf(authentication, #id)")
     public List<ServiceBookEventResponse> serviceBookTimeline(@PathVariable Long id) {
         return employeeServiceBookService.timeline(id);
     }
 
     @PostMapping("/{id}/service-book")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public ResponseEntity<ServiceBookEventResponse> recordServiceBookEvent(@PathVariable Long id, @Valid @RequestBody ServiceBookEventRequest request) {
         ServiceBookEventResponse created = employeeServiceBookService.recordEvent(id, request);
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
@@ -135,25 +135,25 @@ public class EmployeeController {
 
     /** Director Ministry Extension + Superannuation Calculator (operational-features task, Section 4). */
     @PostMapping("/{id}/superannuation/ministry-extension")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public SuperannuationExtensionResponse applyMinistryExtension(@PathVariable Long id, @Valid @RequestBody MinistryExtensionRequest request) {
         return superannuationExtensionService.applyMinistryExtension(id, request);
     }
 
     @GetMapping("/{id}/superannuation/calculation-preview")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN') or @employeeSecurity.isSelf(authentication, #id)")
+    @PreAuthorize("hasRole('HR_ADMIN') or @employeeSecurity.isSelf(authentication, #id)")
     public SuperannuationCalculationPreviewResponse calculationPreview(@PathVariable Long id) {
         return superannuationExtensionService.calculationPreview(id);
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public EmployeeResponse update(@PathVariable Long id, @Valid @RequestBody EmployeeRequest request) {
         return employeeService.update(id, request);
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public ResponseEntity<Void> delete(@PathVariable Long id) {
         employeeService.delete(id);
         return ResponseEntity.noContent().build();

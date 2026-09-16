@@ -30,7 +30,7 @@ public class LeaveLedgerEntryController {
      * (Gate 2) reviewer can pull up an employee's EL ledger from the encashment admin review queue.
      */
     @GetMapping
-    @PreAuthorize("isAuthenticated() and (@attendanceAggSec.canEvaluateFor(authentication, #employeeId) or hasAnyRole('FINANCE_ADMIN'))")
+    @PreAuthorize("isAuthenticated() and (@attendanceAggSec.canEvaluateFor(authentication, #employeeId) or hasRole('FINANCE_ADMIN'))")
     public List<LeaveLedgerEntryResponse> list(@RequestParam(required = false) Long employeeId,
                                                 @RequestParam(required = false) String leaveTypeCode,
                                                 Authentication authentication) {

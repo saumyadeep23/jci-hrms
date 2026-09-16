@@ -38,7 +38,7 @@ public class TerminalSettlementController {
     }
 
     @GetMapping("/preview/{employeeId}")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public TerminalSettlementResponse preview(@PathVariable Long employeeId,
                                                @RequestParam SeparationType separationType,
                                                @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate separationDate,
@@ -50,7 +50,7 @@ public class TerminalSettlementController {
     }
 
     @PostMapping("/generate/{employeeId}")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public ResponseEntity<TerminalSettlementResponse> generate(@PathVariable Long employeeId,
                                                                  @Valid @RequestBody TerminalSettlementGenerateRequest request) {
         TerminalSettlement settlement = terminalSettlementService.generate(
@@ -59,21 +59,29 @@ public class TerminalSettlementController {
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public TerminalSettlementResponse getById(@PathVariable Long id) {
         return toResponse(terminalSettlementService.getById(id));
     }
 
     @PostMapping("/{id}/beneficiaries")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public List<TerminalSettlementBeneficiaryResponse> updateBeneficiaries(@PathVariable Long id,
                                                                             @Valid @RequestBody TerminalSettlementBeneficiaryListRequest request) {
         List<TerminalSettlementBeneficiary> saved = terminalSettlementService.replaceBeneficiaries(id, request.beneficiaries());
         return saved.stream().map(TerminalSettlementBeneficiaryResponse::from).toList();
     }
 
+    // Non-financial RBAC migration (docs/security/RBAC_MIGRATION_REPORT.md): SUPER_ADMIN removed per
+    // confirmed direction ("SYSTEM_ADMIN must not independently approve terminal financial
+    // settlement"). REQUIRES_BUSINESS_CONFIRMATION: the existing RBAC permission matrix has no distinct
+    // checker permission for terminal settlement (unlike CPF/JCIECCS/Payroll, which have their own
+    // *_ADMIN checker roles) - HR_ADMIN is retained here as the only currently-known authority, but
+    // whether approval should require a role/permission distinct from whoever generates the settlement
+    // (maker != checker, matching the pattern already enforced for CPF/JCIECCS) has not been decided and
+    // is not invented here.
     @PostMapping("/{id}/approve")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public TerminalSettlementResponse approve(@PathVariable Long id) {
         return toResponse(terminalSettlementService.approve(id));
     }

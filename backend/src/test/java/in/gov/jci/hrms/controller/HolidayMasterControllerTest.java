@@ -107,16 +107,17 @@ class HolidayMasterControllerTest {
                 .andExpect(status().isBadRequest());
     }
 
+    // Non-financial RBAC migration (docs/security/RBAC_MIGRATION_REPORT.md): SUPER_ADMIN removed -
+    // every mutation here is HR_ADMIN only now.
     @Test
     @WithMockUser(roles = "SUPER_ADMIN")
-    void update_asSuperAdmin_returns200() throws Exception {
+    void update_asSuperAdmin_returns403() throws Exception {
         HolidayMasterUpdateRequest request = new HolidayMasterUpdateRequest("Republic Day", LocalDate.of(2026, 1, 26), HolidayType.GAZETTED, "ALL", null);
-        when(holidayMasterService.update(eq(1L), any(HolidayMasterUpdateRequest.class))).thenReturn(row());
 
         mockMvc.perform(put("/api/v1/master/holidays/1")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
-                .andExpect(status().isOk());
+                .andExpect(status().isForbidden());
     }
 
     @Test

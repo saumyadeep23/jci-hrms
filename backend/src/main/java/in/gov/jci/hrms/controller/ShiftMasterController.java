@@ -25,7 +25,7 @@ import java.net.URI;
 /** Master Data Console's Shift Master (Watchmen/Security/General rosters). */
 @RestController
 @RequestMapping("/api/v1/attendance/shifts")
-@PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+@PreAuthorize("hasRole('HR_ADMIN')")
 public class ShiftMasterController {
 
     private final ShiftMasterService shiftMasterService;

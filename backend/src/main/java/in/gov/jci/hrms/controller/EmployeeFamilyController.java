@@ -24,14 +24,14 @@ public class EmployeeFamilyController {
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN') or @employeeSecurity.isSelf(authentication, #employeeId)")
+    @PreAuthorize("hasRole('HR_ADMIN') or @employeeSecurity.isSelf(authentication, #employeeId)")
     public ResponseEntity<FamilyDetailsResponse> get(@PathVariable Long employeeId) {
         FamilyDetailsResponse response = familyDetailsService.getByEmployee(employeeId);
         return response != null ? ResponseEntity.ok(response) : ResponseEntity.noContent().build();
     }
 
     @PutMapping
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public FamilyDetailsResponse upsert(@PathVariable Long employeeId, @Valid @RequestBody FamilyDetailsRequest request) {
         return familyDetailsService.upsert(employeeId, request);
     }

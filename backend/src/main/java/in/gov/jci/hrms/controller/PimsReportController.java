@@ -36,7 +36,7 @@ import org.springframework.web.bind.annotation.RestController;
 /** PIMS_SPEC.md reporting-hub task, Sections 2 and 3. */
 @RestController
 @RequestMapping("/api/v1/reports/pims")
-@PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+@PreAuthorize("hasRole('HR_ADMIN')")
 public class PimsReportController {
 
     private final CadreStrengthReportService cadreStrengthReportService;

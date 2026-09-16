@@ -29,7 +29,7 @@ import java.util.List;
  */
 @RestController
 @RequestMapping("/api/v1/leaves")
-@PreAuthorize("hasAnyRole('EMPLOYEE', 'HR_ADMIN', 'SUPER_ADMIN')")
+@PreAuthorize("hasAnyRole('EMPLOYEE', 'HR_ADMIN')")
 public class LeaveRoutingController {
 
     private final LeaveApplicationService leaveApplicationService;
@@ -39,7 +39,7 @@ public class LeaveRoutingController {
     }
 
     @PostMapping("/{id}/forward")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN') or @leaveSec.isCurrentAssignee(authentication, #id)")
+    @PreAuthorize("hasRole('HR_ADMIN') or @leaveSec.isCurrentAssignee(authentication, #id)")
     public LeaveApplicationResponse forward(@PathVariable Long id, @Valid @RequestBody LeaveForwardRequest request,
                                              Authentication authentication) {
         return leaveApplicationService.forward(id, request.forwardedToEmployeeId(), request.remarks(),
@@ -47,7 +47,7 @@ public class LeaveRoutingController {
     }
 
     @PostMapping("/{id}/sanction")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN') or @leaveSec.isCurrentAssignee(authentication, #id)")
+    @PreAuthorize("hasRole('HR_ADMIN') or @leaveSec.isCurrentAssignee(authentication, #id)")
     public LeaveApplicationResponse sanction(@PathVariable Long id, @RequestBody(required = false) LeaveDecisionRequest request,
                                               Authentication authentication) {
         String remarks = request != null ? request.remarks() : null;
@@ -55,21 +55,21 @@ public class LeaveRoutingController {
     }
 
     @PostMapping("/{id}/reject")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN') or @leaveSec.isCurrentAssignee(authentication, #id)")
+    @PreAuthorize("hasRole('HR_ADMIN') or @leaveSec.isCurrentAssignee(authentication, #id)")
     public LeaveApplicationResponse reject(@PathVariable Long id, @RequestBody LeaveDecisionRequest request,
                                             Authentication authentication) {
         return leaveApplicationService.rejectWithRemarks(id, request.remarks(), SecurityUtils.currentEmployeeId(authentication));
     }
 
     @GetMapping("/{id}/routing-history")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN') or @leaveSec.isSelf(authentication, #id) "
+    @PreAuthorize("hasRole('HR_ADMIN') or @leaveSec.isSelf(authentication, #id) "
             + "or @leaveSec.isApprover(authentication, #id) or @leaveSec.isCurrentAssignee(authentication, #id)")
     public List<LeaveRoutingActionResponse> routingHistory(@PathVariable Long id) {
         return leaveApplicationService.getRoutingHistory(id);
     }
 
     @GetMapping("/sanctions/history")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public List<LeaveSanctionHistoryResponse> sanctionsHistory(@RequestParam int year,
                                                                 @RequestParam(required = false) Integer month,
                                                                 @RequestParam(required = false) String status) {

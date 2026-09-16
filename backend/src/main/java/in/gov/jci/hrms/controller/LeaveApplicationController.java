@@ -25,7 +25,7 @@ import java.net.URI;
 
 @RestController
 @RequestMapping("/api/leave-applications")
-@PreAuthorize("hasAnyRole('EMPLOYEE', 'HR_ADMIN', 'SUPER_ADMIN')")
+@PreAuthorize("hasAnyRole('EMPLOYEE', 'HR_ADMIN')")
 public class LeaveApplicationController {
 
     private final LeaveApplicationService leaveApplicationService;
@@ -53,44 +53,44 @@ public class LeaveApplicationController {
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN') or @leaveSec.isSelf(authentication, #id) or @leaveSec.isApprover(authentication, #id)")
+    @PreAuthorize("hasRole('HR_ADMIN') or @leaveSec.isSelf(authentication, #id) or @leaveSec.isApprover(authentication, #id)")
     public LeaveApplicationResponse getById(@PathVariable Long id) {
         return leaveApplicationService.getById(id);
     }
 
     /** Edits a DRAFT in place - LeaveApplicationService.update() enforces the DRAFT-only status guard. */
     @PutMapping("/{id}")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN') or @leaveSec.isSelf(authentication, #id)")
+    @PreAuthorize("hasRole('HR_ADMIN') or @leaveSec.isSelf(authentication, #id)")
     public LeaveApplicationResponse update(@PathVariable Long id, @Valid @RequestBody LeaveApplicationRequest request) {
         return leaveApplicationService.update(id, request);
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public Page<LeaveApplicationResponse> list(Pageable pageable) {
         return leaveApplicationService.list(pageable);
     }
 
     @PostMapping("/{id}/submit")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN') or @leaveSec.isSelf(authentication, #id)")
+    @PreAuthorize("hasRole('HR_ADMIN') or @leaveSec.isSelf(authentication, #id)")
     public LeaveApplicationResponse submit(@PathVariable Long id) {
         return leaveApplicationService.submit(id);
     }
 
     @PostMapping("/{id}/approve")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN') or @leaveSec.isApprover(authentication, #id)")
+    @PreAuthorize("hasRole('HR_ADMIN') or @leaveSec.isApprover(authentication, #id)")
     public LeaveApplicationResponse approve(@PathVariable Long id) {
         return leaveApplicationService.approve(id);
     }
 
     @PostMapping("/{id}/reject")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN') or @leaveSec.isApprover(authentication, #id)")
+    @PreAuthorize("hasRole('HR_ADMIN') or @leaveSec.isApprover(authentication, #id)")
     public LeaveApplicationResponse reject(@PathVariable Long id) {
         return leaveApplicationService.reject(id);
     }
 
     @PostMapping("/{id}/cancel")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN') or @leaveSec.isSelf(authentication, #id)")
+    @PreAuthorize("hasRole('HR_ADMIN') or @leaveSec.isSelf(authentication, #id)")
     public LeaveApplicationResponse cancel(@PathVariable Long id) {
         return leaveApplicationService.cancel(id);
     }

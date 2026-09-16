@@ -19,7 +19,7 @@ import java.net.URI;
 
 @RestController
 @RequestMapping("/api/apar/cycles")
-@PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+@PreAuthorize("hasRole('HR_ADMIN')")
 public class AparCycleController {
 
     private final AparCycleService aparCycleService;

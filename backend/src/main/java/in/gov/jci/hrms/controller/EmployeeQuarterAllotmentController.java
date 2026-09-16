@@ -20,7 +20,7 @@ import java.util.List;
 /** Employee Company Accommodation (Onboarding/Edit Tab 9) - current and historical quarter allotments for one employee. */
 @RestController
 @RequestMapping("/api/v1/employees/{employeeId}/quarter-allotments")
-@PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN') or @employeeSecurity.isSelf(authentication, #employeeId)")
+@PreAuthorize("hasRole('HR_ADMIN') or @employeeSecurity.isSelf(authentication, #employeeId)")
 public class EmployeeQuarterAllotmentController {
 
     private final EmployeeQuarterAllotmentService quarterAllotmentService;
@@ -35,7 +35,7 @@ public class EmployeeQuarterAllotmentController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public ResponseEntity<QuarterAllotmentResponse> create(@PathVariable Long employeeId,
                                                              @Valid @RequestBody QuarterAllotmentRequest request) {
         QuarterAllotmentResponse created = quarterAllotmentService.create(employeeId, request);
@@ -44,7 +44,7 @@ public class EmployeeQuarterAllotmentController {
     }
 
     @PutMapping("/{allotmentId}")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public QuarterAllotmentResponse update(@PathVariable Long employeeId, @PathVariable Long allotmentId,
                                             @Valid @RequestBody QuarterAllotmentRequest request) {
         return quarterAllotmentService.update(employeeId, allotmentId, request);

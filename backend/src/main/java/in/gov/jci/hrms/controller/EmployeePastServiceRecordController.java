@@ -30,13 +30,13 @@ public class EmployeePastServiceRecordController {
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN') or @employeeSecurity.isSelf(authentication, #employeeId)")
+    @PreAuthorize("hasRole('HR_ADMIN') or @employeeSecurity.isSelf(authentication, #employeeId)")
     public List<PastServiceRecordResponse> list(@PathVariable Long employeeId) {
         return pastServiceRecordService.listByEmployee(employeeId);
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public ResponseEntity<PastServiceRecordResponse> create(@PathVariable Long employeeId,
                                                               @Valid @RequestBody PastServiceRecordRequest request) {
         PastServiceRecordResponse created = pastServiceRecordService.create(employeeId, request);
@@ -45,21 +45,21 @@ public class EmployeePastServiceRecordController {
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public PastServiceRecordResponse update(@PathVariable Long employeeId, @PathVariable Long id,
                                              @Valid @RequestBody PastServiceRecordRequest request) {
         return pastServiceRecordService.update(employeeId, id, request);
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public ResponseEntity<Void> delete(@PathVariable Long employeeId, @PathVariable Long id) {
         pastServiceRecordService.delete(employeeId, id);
         return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/{id}/verify")
-    @PreAuthorize("hasAnyRole('HR_ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasRole('HR_ADMIN')")
     public PastServiceRecordResponse verify(@PathVariable Long employeeId, @PathVariable Long id,
                                              @RequestHeader(value = "X-Acting-User", required = false) String actingUser) {
         return pastServiceRecordService.verify(employeeId, id, actingUser);
